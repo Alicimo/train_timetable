@@ -24,8 +24,22 @@ def load_departures_data() -> dict[str, Any] | None:
         with open(json_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        # Handle both old and new JSON formats for backward compatibility
+        if "journey" in data:
+            # Old format - convert to new format
+            logger.info("Converting old format to new bidirectional format")
+            data = {
+                "badVoeslauToWien": data.get("journey", []),
+                "wienToBadVoeslau": [],
+                "lastUpdated": data.get("lastUpdated", ""),
+                "stations": {"badVoeslau": data.get("station", {}), "wienHbf": None},
+            }
+
+        bad_voeslau_count = len(data.get("badVoeslauToWien", []))
+        wien_count = len(data.get("wienToBadVoeslau", []))
+
         logger.info(
-            f"Loaded {len(data.get('journey', []))} departures from {json_file}"
+            f"Loaded {bad_voeslau_count} Bad Vöslau→Wien + {wien_count} Wien→Bad Vöslau departures from {json_file}"
         )
         logger.info(f"Data last updated: {data.get('lastUpdated', 'Unknown')}")
         return data
@@ -121,17 +135,66 @@ def calculate_delay(scheduled: str | None, actual: str | None) -> int:
         return 0
 
 
+def create_train_table(trains: list[dict[str, Any]], direction_label: str) -> None:
+    """Create and display a train table for a given direction"""
+    if not trains:
+        st.warning(f"No {direction_label} departures found in the current data.")
+        return
+
+    # Create DataFrame
+    train_data = []
+
+    for train in trains:
+        scheduled_time = train.get("ti", "N/A")
+        actual_time = (
+            train.get("rt", {}).get("dlt") if train.get("rt") else scheduled_time
+        )
+        delay_minutes = (
+            calculate_delay(scheduled_time, actual_time)
+            if actual_time != scheduled_time
+            else 0
+        )
+
+        train_data.append(
+            {
+                "Departure": format_time(scheduled_time),
+                "Actual": format_time(actual_time)
+                if actual_time != scheduled_time
+                else "✓ On time",
+                "Delay (min)": str(delay_minutes) if delay_minutes > 0 else "—",
+                "Train": train.get("pr", "Unknown"),
+                "Platform": train.get("tr", "TBA"),
+            }
+        )
+
+    df = pd.DataFrame(train_data)
+
+    # Display table with styling
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Departure": st.column_config.TextColumn("Scheduled", width="small"),
+            "Actual": st.column_config.TextColumn("Actual/Status", width="medium"),
+            "Delay (min)": st.column_config.TextColumn("Delay", width="small"),
+            "Train": st.column_config.TextColumn("Train Type", width="small"),
+            "Platform": st.column_config.TextColumn("Platform", width="small"),
+        },
+    )
+
+
 def main() -> None:
     logger.info("=== Starting Streamlit application ===")
     st_autorefresh(interval=60000, key="refresh")
     st.set_page_config(
-        page_title="Bad Vöslau → Wien Hbf Trains",
+        page_title="Bad Vöslau ↔ Wien Hbf Trains",
         page_icon="🚂",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
 
-    st.title("🚂 Bad Vöslau → Wien Hauptbahnhof")
+    st.title("🚂 Bad Vöslau ↔ Wien Hauptbahnhof")
     st.subheader("Live Train Departures")
 
     # Auto-fetch fresh data if cached data is stale
@@ -149,7 +212,9 @@ def main() -> None:
     col1, col2 = st.columns([3, 1])
 
     with col1:
-        st.write("Showing trains from Bad Vöslau that stop at Wien Hauptbahnhof")
+        st.write(
+            "Showing trains in both directions between Bad Vöslau and Wien Hauptbahnhof"
+        )
 
     with col2:
         if st.button("🔄 Refresh Now"):
@@ -165,95 +230,65 @@ def main() -> None:
         departures_data = load_departures_data()
 
         if departures_data:
+            # Get train data for both directions
+            bad_voeslau_to_wien = departures_data.get("badVoeslauToWien", [])
+            wien_to_bad_voeslau = departures_data.get("wienToBadVoeslau", [])
+
             logger.debug(
-                f"Successfully loaded {len(departures_data.get('journey', []))} departures"
+                f"Successfully loaded {len(bad_voeslau_to_wien)} Bad Vöslau→Wien + {len(wien_to_bad_voeslau)} Wien→Bad Vöslau departures"
             )
-            # The data from Node.js is already pre-filtered for Wien trains
-            trains = departures_data.get("journey", [])
 
-            if trains:
-                # Create DataFrame
-                train_data = []
-
-                for train in trains:
-                    scheduled_time = train.get("ti", "N/A")
-                    actual_time = (
-                        train.get("rt", {}).get("dlt")
-                        if train.get("rt")
-                        else scheduled_time
+            # Display data freshness information
+            vienna_tz = pytz.timezone("Europe/Vienna")
+            last_updated_str = departures_data.get("lastUpdated", "")
+            if last_updated_str:
+                try:
+                    last_updated = datetime.fromisoformat(
+                        last_updated_str.replace("Z", "+00:00")
                     )
-                    delay_minutes = (
-                        calculate_delay(scheduled_time, actual_time)
-                        if actual_time != scheduled_time
-                        else 0
+                    last_updated_vienna = last_updated.astimezone(vienna_tz)
+
+                    st.write(
+                        f"**Data fetched:** {last_updated_vienna.strftime('%H:%M:%S')} (Vienna time)"
                     )
 
-                    train_data.append(
-                        {
-                            "Departure": format_time(scheduled_time),
-                            "Actual": format_time(actual_time)
-                            if actual_time != scheduled_time
-                            else "✓ On time",
-                            "Delay (min)": str(delay_minutes)
-                            if delay_minutes > 0
-                            else "—",
-                            "Train": train.get("pr", "Unknown"),
-                            "Platform": train.get("tr", "TBA"),
-                            "Destination": train.get("st", "Unknown"),
-                        }
-                    )
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Could not parse lastUpdated timestamp: {e}")
 
-                df = pd.DataFrame(train_data)
+            # Create tabs for both directions - order based on time of day
+            vienna_tz = pytz.timezone("Europe/Vienna")
+            current_vienna_time = datetime.now(vienna_tz)
+            is_afternoon = current_vienna_time.hour >= 12
 
-                # Display data freshness information
-                vienna_tz = pytz.timezone("Europe/Vienna")
+            # After midday, show Wien → Bad Vöslau first (homebound traffic)
+            if is_afternoon:
+                tab_labels = ["🚂 Wien Hbf → Bad Vöslau", "🚂 Bad Vöslau → Wien Hbf"]
+                tab1, tab2 = st.tabs(tab_labels)
 
-                # Parse the lastUpdated timestamp from JSON data
-                last_updated_str = departures_data.get("lastUpdated", "")
-                if last_updated_str:
-                    try:
-                        last_updated = datetime.fromisoformat(
-                            last_updated_str.replace("Z", "+00:00")
-                        )
-                        last_updated_vienna = last_updated.astimezone(vienna_tz)
+                with tab1:
+                    st.subheader("Departures from Wien Hauptbahnhof to Bad Vöslau")
+                    create_train_table(wien_to_bad_voeslau, "Wien → Bad Vöslau")
 
-                        st.write(
-                            f"**Data fetched:** {last_updated_vienna.strftime('%H:%M:%S')} (Vienna time)"
-                        )
-
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Could not parse lastUpdated timestamp: {e}")
-
-                    # Display table with styling
-                    st.dataframe(
-                        df,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "Departure": st.column_config.TextColumn(
-                                "Scheduled", width="small"
-                            ),
-                            "Actual": st.column_config.TextColumn(
-                                "Actual/Status", width="medium"
-                            ),
-                            "Delay (min)": st.column_config.TextColumn(
-                                "Delay", width="small"
-                            ),
-                            "Train": st.column_config.TextColumn(
-                                "Train Type", width="small"
-                            ),
-                            "Platform": st.column_config.TextColumn(
-                                "Platform", width="small"
-                            ),
-                        },
-                    )
-
-                else:
-                    st.warning("No train departures found in the current data.")
+                with tab2:
+                    st.subheader("Departures from Bad Vöslau to Wien Hauptbahnhof")
+                    create_train_table(bad_voeslau_to_wien, "Bad Vöslau → Wien")
             else:
-                st.error(
-                    "Could not load departure data. Please run the Node.js fetcher script first."
-                )
+                # Morning: show Bad Vöslau → Wien first (work commute)
+                tab_labels = ["🚂 Bad Vöslau → Wien Hbf", "🚂 Wien Hbf → Bad Vöslau"]
+                tab1, tab2 = st.tabs(tab_labels)
+
+                with tab1:
+                    st.subheader("Departures from Bad Vöslau to Wien Hauptbahnhof")
+                    create_train_table(bad_voeslau_to_wien, "Bad Vöslau → Wien")
+
+                with tab2:
+                    st.subheader("Departures from Wien Hauptbahnhof to Bad Vöslau")
+                    create_train_table(wien_to_bad_voeslau, "Wien → Bad Vöslau")
+
+        else:
+            st.error(
+                "Could not load departure data. Please run the Node.js fetcher script first."
+            )
 
         st.session_state.last_update = datetime.now()
         logger.debug(

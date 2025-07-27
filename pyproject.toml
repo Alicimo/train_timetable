@@ -7,8 +7,11 @@ requires-python = ">=3.12"
 dependencies = [
     "ipykernel>=6.30.0",
     "loguru>=0.7.3",
+    "pandas>=2.0.0",
     "polars>=1.31.0",
     "pytest>=8.4.1",
+    "pytest-mock>=3.12.0",
+    "freezegun>=1.5.0",
     "pytz>=2025.2",
     "requests>=2.32.4",
     "ruff>=0.12.5",
@@ -37,6 +40,7 @@ exclude = ["*.ipynb"]
     "D",        # Doctstrings
     "S101",     # Allow asserts
     "ANN201",   # Return type annotation
+    "ANN401",   # Dynamically typed expressions (Any)
 ]
 
 [tool.pytest.ini_options]

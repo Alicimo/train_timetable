@@ -145,6 +145,10 @@ def create_train_table(trains: list[dict[str, Any]], direction_label: str) -> No
     train_data = []
 
     for train in trains:
+        # Handle None train objects
+        if train is None:
+            continue
+            
         scheduled_time = train.get("ti", "N/A")
         actual_time = (
             train.get("rt", {}).get("dlt") if train.get("rt") else scheduled_time
@@ -184,6 +188,61 @@ def create_train_table(trains: list[dict[str, Any]], direction_label: str) -> No
     )
 
 
+def get_direction_data(departures_data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Extract train data for both directions from departures data"""
+    if not departures_data:
+        return [], []
+    
+    bad_voeslau_to_wien = departures_data.get("badVoeslauToWien", [])
+    wien_to_bad_voeslau = departures_data.get("wienToBadVoeslau", [])
+    
+    logger.debug(
+        f"Successfully loaded {len(bad_voeslau_to_wien)} Bad Vöslau→Wien + {len(wien_to_bad_voeslau)} Wien→Bad Vöslau departures"
+    )
+    
+    return bad_voeslau_to_wien, wien_to_bad_voeslau
+
+
+def format_last_updated_display(last_updated_str: str) -> str | None:
+    """Format last updated timestamp for display in Vienna timezone"""
+    if not last_updated_str:
+        return None
+        
+    try:
+        vienna_tz = pytz.timezone("Europe/Vienna")
+        last_updated = datetime.fromisoformat(
+            last_updated_str.replace("Z", "+00:00")
+        )
+        last_updated_vienna = last_updated.astimezone(vienna_tz)
+        return last_updated_vienna.strftime('%H:%M:%S')
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Could not parse lastUpdated timestamp: {e}")
+        return None
+
+
+def determine_tab_order(current_time: datetime | None = None) -> tuple[bool, list[str]]:
+    """Determine tab order based on time of day (afternoon prioritizes homebound traffic)"""
+    if current_time is None:
+        vienna_tz = pytz.timezone("Europe/Vienna")
+        current_time = datetime.now(vienna_tz)
+    
+    is_afternoon = current_time.hour >= 12
+    
+    if is_afternoon:
+        # After midday, show Wien → Bad Vöslau first (homebound traffic)
+        tab_labels = ["🚂 Wien Hbf → Bad Vöslau", "🚂 Bad Vöslau → Wien Hbf"]
+    else:
+        # Morning: show Bad Vöslau → Wien first (work commute)
+        tab_labels = ["🚂 Bad Vöslau → Wien Hbf", "🚂 Wien Hbf → Bad Vöslau"]
+    
+    return is_afternoon, tab_labels
+
+
+def should_auto_refresh(departures_data: dict[str, Any] | None, refresh_interval: int = 60) -> bool:
+    """Determine if data should be automatically refreshed"""
+    return departures_data is not None and is_data_stale(departures_data, refresh_interval)
+
+
 def main() -> None:
     logger.info("=== Starting Streamlit application ===")
     st_autorefresh(interval=60000, key="refresh")
@@ -204,7 +263,7 @@ def main() -> None:
         logger.debug("Loading departure data from JSON file")
         departures_data = load_departures_data()
 
-    if departures_data and is_data_stale(departures_data, refresh_interval):
+    if should_auto_refresh(departures_data, refresh_interval):
         logger.info("Cached data is stale, fetching fresh data automatically")
         update_data()
 
@@ -223,48 +282,25 @@ def main() -> None:
 
     # Always load and display data
     logger.info("Loading train data for display")
-    # Show loading spinner
     with st.spinner("Loading train data..."):
-        # Load departure data from JSON file
         logger.debug("Loading departure data from JSON file")
         departures_data = load_departures_data()
 
         if departures_data:
             # Get train data for both directions
-            bad_voeslau_to_wien = departures_data.get("badVoeslauToWien", [])
-            wien_to_bad_voeslau = departures_data.get("wienToBadVoeslau", [])
-
-            logger.debug(
-                f"Successfully loaded {len(bad_voeslau_to_wien)} Bad Vöslau→Wien + {len(wien_to_bad_voeslau)} Wien→Bad Vöslau departures"
-            )
+            bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(departures_data)
 
             # Display data freshness information
-            vienna_tz = pytz.timezone("Europe/Vienna")
             last_updated_str = departures_data.get("lastUpdated", "")
-            if last_updated_str:
-                try:
-                    last_updated = datetime.fromisoformat(
-                        last_updated_str.replace("Z", "+00:00")
-                    )
-                    last_updated_vienna = last_updated.astimezone(vienna_tz)
-
-                    st.write(
-                        f"**Data fetched:** {last_updated_vienna.strftime('%H:%M:%S')} (Vienna time)"
-                    )
-
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Could not parse lastUpdated timestamp: {e}")
+            formatted_time = format_last_updated_display(last_updated_str)
+            if formatted_time:
+                st.write(f"**Data fetched:** {formatted_time} (Vienna time)")
 
             # Create tabs for both directions - order based on time of day
-            vienna_tz = pytz.timezone("Europe/Vienna")
-            current_vienna_time = datetime.now(vienna_tz)
-            is_afternoon = current_vienna_time.hour >= 12
+            is_afternoon, tab_labels = determine_tab_order()
+            tab1, tab2 = st.tabs(tab_labels)
 
-            # After midday, show Wien → Bad Vöslau first (homebound traffic)
             if is_afternoon:
-                tab_labels = ["🚂 Wien Hbf → Bad Vöslau", "🚂 Bad Vöslau → Wien Hbf"]
-                tab1, tab2 = st.tabs(tab_labels)
-
                 with tab1:
                     st.subheader("Departures from Wien Hauptbahnhof to Bad Vöslau")
                     create_train_table(wien_to_bad_voeslau, "Wien → Bad Vöslau")
@@ -273,10 +309,6 @@ def main() -> None:
                     st.subheader("Departures from Bad Vöslau to Wien Hauptbahnhof")
                     create_train_table(bad_voeslau_to_wien, "Bad Vöslau → Wien")
             else:
-                # Morning: show Bad Vöslau → Wien first (work commute)
-                tab_labels = ["🚂 Bad Vöslau → Wien Hbf", "🚂 Wien Hbf → Bad Vöslau"]
-                tab1, tab2 = st.tabs(tab_labels)
-
                 with tab1:
                     st.subheader("Departures from Bad Vöslau to Wien Hauptbahnhof")
                     create_train_table(bad_voeslau_to_wien, "Bad Vöslau → Wien")
@@ -296,12 +328,15 @@ def main() -> None:
         )
 
 
-def update_data() -> None:
+def update_data() -> bool:
+    """Update data and return success status"""
     if fetch_fresh_data():
         logger.info("Successfully fetched fresh data, reloading")
         st.rerun()
+        return True
     else:
         logger.warning("Failed to fetch fresh data, using cached data")
+        return False
 
 
 if __name__ == "__main__":

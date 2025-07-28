@@ -13,10 +13,6 @@ A real-time train departure app showing trains from Bad Vöslau to Vienna Centra
 ## Quick Start
 
 ```bash
-# Run the complete app (fetches data + starts UI)
-./run_app.sh
-
-# Or run components separately:
 node fetch_departures.js  # Fetch latest data
 uv run streamlit run app.py  # Start web UI
 ```
@@ -29,10 +25,22 @@ uv run ruff format .        # Format code
 uv run ruff check .         # Lint code
 uv run pytest              # Run tests
 
-# Node.js development  
+# Node.js development
 npm install                 # Install dependencies
 node fetch_departures.js   # Test data fetching
 ```
+
+### Important Note for HAFAS Client
+
+After running `npm install`, you may need to update the ÖBB API version number in the HAFAS client configuration:
+
+```bash
+# If you encounter API version errors, update the version in:
+# node_modules/hafas-client/p/oebb/base.json
+# Change the version number to "1.45" or the latest version
+```
+
+This is required because the ÖBB API occasionally updates their version requirements, and the hardcoded version in the HAFAS client may become outdated.
 
 ## Dependencies
 

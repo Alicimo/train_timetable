@@ -18,14 +18,18 @@ from app import (
 class TestLoadDeparturesData:
     """Tests for load_departures_data function"""
 
-    def test_load_valid_new_format_data(self, sample_train_data: dict[str, Any], temp_json_file: Any) -> None:
+    def test_load_valid_new_format_data(
+        self, sample_train_data: dict[str, Any], temp_json_file: Any
+    ) -> None:
         """Test loading valid data in new bidirectional format"""
         temp_json_file(sample_train_data)  # Create temp file
-        
-        with patch('app.os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open(read_data=json.dumps(sample_train_data))):
+
+        with (
+            patch("app.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=json.dumps(sample_train_data))),
+        ):
             result = load_departures_data()
-        
+
         assert result is not None
         assert result == sample_train_data
         assert "badVoeslauToWien" in result
@@ -35,10 +39,14 @@ class TestLoadDeparturesData:
 
     def test_load_old_format_conversion(self, old_format_train_data: dict[str, Any]):
         """Test loading and converting old format data"""
-        with patch('app.os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open(read_data=json.dumps(old_format_train_data))):
+        with (
+            patch("app.os.path.exists", return_value=True),
+            patch(
+                "builtins.open", mock_open(read_data=json.dumps(old_format_train_data))
+            ),
+        ):
             result = load_departures_data()
-        
+
         assert result is not None
         # Should be converted to new format
         assert "badVoeslauToWien" in result
@@ -49,33 +57,39 @@ class TestLoadDeparturesData:
 
     def test_load_missing_file(self):
         """Test handling of missing JSON file"""
-        with patch('app.os.path.exists', return_value=False):
+        with patch("app.os.path.exists", return_value=False):
             result = load_departures_data()
-        
+
         assert result is None
 
     def test_load_invalid_json(self, invalid_json_content: str):
         """Test handling of invalid JSON content"""
-        with patch('app.os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open(read_data=invalid_json_content)):
+        with (
+            patch("app.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=invalid_json_content)),
+        ):
             result = load_departures_data()
-        
+
         assert result is None
 
     def test_load_file_read_error(self):
         """Test handling of file read errors"""
-        with patch('app.os.path.exists', return_value=True), \
-             patch('builtins.open', side_effect=IOError("Permission denied")):
+        with (
+            patch("app.os.path.exists", return_value=True),
+            patch("builtins.open", side_effect=IOError("Permission denied")),
+        ):
             result = load_departures_data()
-        
+
         assert result is None
 
     def test_load_empty_data(self, empty_train_data: dict[str, Any]):
         """Test loading empty but valid data"""
-        with patch('app.os.path.exists', return_value=True), \
-             patch('builtins.open', mock_open(read_data=json.dumps(empty_train_data))):
+        with (
+            patch("app.os.path.exists", return_value=True),
+            patch("builtins.open", mock_open(read_data=json.dumps(empty_train_data))),
+        ):
             result = load_departures_data()
-        
+
         assert result is not None
         assert result == empty_train_data
         assert len(result["badVoeslauToWien"]) == 0
@@ -109,7 +123,7 @@ class TestIsDataStale:
         current_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         data = sample_train_data.copy()
         data["lastUpdated"] = current_iso
-        
+
         result = is_data_stale(data, max_age_seconds=300)
         assert result is False
 
@@ -127,7 +141,7 @@ class TestIsDataStale:
         """Test data without timestamp is considered stale"""
         data = sample_train_data.copy()
         del data["lastUpdated"]
-        
+
         result = is_data_stale(data, max_age_seconds=60)
         assert result is True
 
@@ -135,7 +149,7 @@ class TestIsDataStale:
         """Test data with empty timestamp is considered stale"""
         data = sample_train_data.copy()
         data["lastUpdated"] = ""
-        
+
         result = is_data_stale(data, max_age_seconds=60)
         assert result is True
 
@@ -143,18 +157,19 @@ class TestIsDataStale:
         """Test data with invalid timestamp is considered stale"""
         data = sample_train_data.copy()
         data["lastUpdated"] = "invalid-timestamp"
-        
+
         result = is_data_stale(data, max_age_seconds=60)
         assert result is True
 
     def test_exactly_at_limit(self, sample_train_data: dict[str, Any]):
         """Test data exactly at the staleness limit"""
         from datetime import timedelta
+
         # Create timestamp exactly 61 seconds ago to ensure it's stale
         past_time = datetime.now(timezone.utc) - timedelta(seconds=61)
         data = sample_train_data.copy()
         data["lastUpdated"] = past_time.isoformat().replace("+00:00", "Z")
-        
+
         result = is_data_stale(data, max_age_seconds=60)
         # Should be stale
         assert result is True
@@ -202,7 +217,7 @@ class TestCalculateDelay:
         """Test calculation with invalid time format"""
         result = calculate_delay("invalid", "10:19")
         assert result == 0
-        
+
         result = calculate_delay("10:17", "invalid")
         assert result == 0
 
@@ -260,7 +275,7 @@ class TestShouldAutoRefresh:
         current_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         data = sample_train_data.copy()
         data["lastUpdated"] = current_iso
-        
+
         result = should_auto_refresh(data, refresh_interval=300)
         assert result is False
 
@@ -272,15 +287,16 @@ class TestShouldAutoRefresh:
     def test_custom_refresh_interval(self, sample_train_data: dict[str, Any]):
         """Test with custom refresh interval"""
         from datetime import timedelta
+
         # Create data that's 30 seconds old
         past_time = datetime.now(timezone.utc) - timedelta(seconds=30)
         data = sample_train_data.copy()
         data["lastUpdated"] = past_time.isoformat().replace("+00:00", "Z")
-        
+
         # Should not refresh with 60s interval
         result = should_auto_refresh(data, refresh_interval=60)
         assert result is False
-        
+
         # Should refresh with 20s interval
         result = should_auto_refresh(data, refresh_interval=20)
         assert result is True

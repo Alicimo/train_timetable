@@ -19,24 +19,24 @@ class TestCreateTrainTable:
     def test_create_table_with_valid_data(self, sample_train_data: dict[str, Any]):
         """Test creating train table with valid data"""
         trains = sample_train_data["badVoeslauToWien"]
-        
+
         # Mock streamlit components
-        with patch('app.st') as mock_st:
+        with patch("app.st") as mock_st:
             mock_st.warning = MagicMock()
             mock_st.dataframe = MagicMock()
             mock_st.column_config = MagicMock()
             mock_st.column_config.TextColumn = MagicMock()
-            
+
             create_train_table(trains, "Bad Vöslau → Wien")
-            
+
             # Should call dataframe, not warning
             mock_st.dataframe.assert_called_once()
             mock_st.warning.assert_not_called()
-            
+
             # Check that DataFrame was created with correct data
             call_args = mock_st.dataframe.call_args
             df = call_args[0][0]
-            
+
             assert isinstance(df, pd.DataFrame)
             assert len(df) == 3  # Three trains in sample data
             assert "Departure" in df.columns
@@ -48,13 +48,13 @@ class TestCreateTrainTable:
     def test_create_table_with_empty_data(self):
         """Test creating train table with empty data"""
         trains = []
-        
-        with patch('app.st') as mock_st:
+
+        with patch("app.st") as mock_st:
             mock_st.warning = MagicMock()
             mock_st.dataframe = MagicMock()
-            
+
             create_train_table(trains, "Bad Vöslau → Wien")
-            
+
             # Should show warning, not dataframe
             mock_st.warning.assert_called_once()
             mock_st.dataframe.assert_not_called()
@@ -62,19 +62,19 @@ class TestCreateTrainTable:
     def test_create_table_data_formatting(self, sample_train_data: dict[str, Any]):
         """Test that data is formatted correctly in the table"""
         trains = sample_train_data["badVoeslauToWien"]
-        
-        with patch('app.st') as mock_st:
+
+        with patch("app.st") as mock_st:
             mock_st.warning = MagicMock()
             mock_st.dataframe = MagicMock()
             mock_st.column_config = MagicMock()
             mock_st.column_config.TextColumn = MagicMock()
-            
+
             create_train_table(trains, "Bad Vöslau → Wien")
-            
+
             # Get the DataFrame that was passed to st.dataframe
             call_args = mock_st.dataframe.call_args
             df = call_args[0][0]
-            
+
             # Check first row (delayed train)
             first_row = df.iloc[0]
             assert first_row["Departure"] == "10:17"
@@ -82,7 +82,7 @@ class TestCreateTrainTable:
             assert first_row["Delay (min)"] == "2"  # 2 minute delay
             assert first_row["Train"] == "REX 3 (Zug-Nr. 19222)"
             assert first_row["Platform"] == "2"
-            
+
             # Check second row (on-time train)
             second_row = df.iloc[1]
             assert second_row["Departure"] == "10:47"
@@ -103,29 +103,29 @@ class TestCreateTrainTable:
                 "st": "Wien Hauptbahnhof",
                 "pr": "REX 3 (Zug-Nr. 19224)",
                 # Missing 'tr' field
-            }
+            },
         ]
-        
-        with patch('app.st') as mock_st:
+
+        with patch("app.st") as mock_st:
             mock_st.warning = MagicMock()
             mock_st.dataframe = MagicMock()
             mock_st.column_config = MagicMock()
             mock_st.column_config.TextColumn = MagicMock()
-            
+
             create_train_table(trains, "Test Direction")
-            
+
             # Should still create dataframe
             mock_st.dataframe.assert_called_once()
-            
+
             call_args = mock_st.dataframe.call_args
             df = call_args[0][0]
-            
+
             # Check that missing fields are handled gracefully
             first_row = df.iloc[0]
             assert first_row["Departure"] == "10:17"
             assert first_row["Train"] == "Unknown"  # Default for missing 'pr'
-            assert first_row["Platform"] == "TBA"   # Default for missing 'tr'
-            
+            assert first_row["Platform"] == "TBA"  # Default for missing 'tr'
+
             second_row = df.iloc[1]
             assert second_row["Platform"] == "TBA"  # Missing 'tr'
 
@@ -141,7 +141,7 @@ class TestCreateTrainTable:
             },
             {
                 "ti": "10:47",
-                "st": "Wien Hauptbahnhof", 
+                "st": "Wien Hauptbahnhof",
                 "pr": "REX 3",
                 "tr": "2",
                 # No real-time data - on time
@@ -149,27 +149,29 @@ class TestCreateTrainTable:
             {
                 "ti": "11:17",
                 "st": "Wien Hauptbahnhof",
-                "pr": "REX 3", 
+                "pr": "REX 3",
                 "tr": "1",
                 "rt": {"dlt": "11:12"},  # Early arrival (-5 minutes)
-            }
+            },
         ]
-        
-        with patch('app.st') as mock_st:
+
+        with patch("app.st") as mock_st:
             mock_st.warning = MagicMock()
             mock_st.dataframe = MagicMock()
             mock_st.column_config = MagicMock()
             mock_st.column_config.TextColumn = MagicMock()
-            
+
             create_train_table(trains, "Test Direction")
-            
+
             call_args = mock_st.dataframe.call_args
             df = call_args[0][0]
-            
+
             # Check delay calculations
-            assert df.iloc[0]["Delay (min)"] == "5"   # Delayed
-            assert df.iloc[1]["Delay (min)"] == "—"   # On time
-            assert df.iloc[2]["Delay (min)"] == "—"   # Early (negative delay shows as no delay)
+            assert df.iloc[0]["Delay (min)"] == "5"  # Delayed
+            assert df.iloc[1]["Delay (min)"] == "—"  # On time
+            assert (
+                df.iloc[2]["Delay (min)"] == "—"
+            )  # Early (negative delay shows as no delay)
 
 
 class TestGetDirectionData:
@@ -178,7 +180,7 @@ class TestGetDirectionData:
     def test_get_direction_data_valid(self, sample_train_data: dict[str, Any]):
         """Test extracting direction data from valid dataset"""
         bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(sample_train_data)
-        
+
         assert len(bad_voeslau_to_wien) == 3
         assert len(wien_to_bad_voeslau) == 2
         assert bad_voeslau_to_wien == sample_train_data["badVoeslauToWien"]
@@ -187,14 +189,14 @@ class TestGetDirectionData:
     def test_get_direction_data_empty(self, empty_train_data: dict[str, Any]):
         """Test extracting direction data from empty dataset"""
         bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(empty_train_data)
-        
+
         assert len(bad_voeslau_to_wien) == 0
         assert len(wien_to_bad_voeslau) == 0
 
     def test_get_direction_data_none(self):
         """Test extracting direction data from None"""
         bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(None)
-        
+
         assert len(bad_voeslau_to_wien) == 0
         assert len(wien_to_bad_voeslau) == 0
 
@@ -202,7 +204,7 @@ class TestGetDirectionData:
         """Test extracting direction data with missing keys"""
         data = {"lastUpdated": "2025-07-27T08:11:19.908Z"}
         bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(data)
-        
+
         assert len(bad_voeslau_to_wien) == 0
         assert len(wien_to_bad_voeslau) == 0
 
@@ -210,11 +212,11 @@ class TestGetDirectionData:
         """Test extracting direction data with only one direction"""
         data = {
             "badVoeslauToWien": [{"ti": "10:17"}],
-            "lastUpdated": "2025-07-27T08:11:19.908Z"
+            "lastUpdated": "2025-07-27T08:11:19.908Z",
             # Missing wienToBadVoeslau
         }
         bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(data)
-        
+
         assert len(bad_voeslau_to_wien) == 1
         assert len(wien_to_bad_voeslau) == 0
 
@@ -225,7 +227,7 @@ class TestDetermineTabOrder:
     def test_morning_tab_order(self, mock_datetime_morning: datetime) -> None:
         """Test tab order in the morning (before 12:00)"""
         is_afternoon, tab_labels = determine_tab_order(mock_datetime_morning)
-        
+
         assert is_afternoon is False
         assert tab_labels[0] == "🚂 Bad Vöslau → Wien Hbf"  # Work commute first
         assert tab_labels[1] == "🚂 Wien Hbf → Bad Vöslau"
@@ -233,7 +235,7 @@ class TestDetermineTabOrder:
     def test_afternoon_tab_order(self, mock_datetime_afternoon: datetime) -> None:
         """Test tab order in the afternoon (after 12:00)"""
         is_afternoon, tab_labels = determine_tab_order(mock_datetime_afternoon)
-        
+
         assert is_afternoon is True
         assert tab_labels[0] == "🚂 Wien Hbf → Bad Vöslau"  # Homebound first
         assert tab_labels[1] == "🚂 Bad Vöslau → Wien Hbf"
@@ -242,7 +244,7 @@ class TestDetermineTabOrder:
         """Test tab order exactly at noon"""
         noon_time = datetime(2025, 7, 27, 12, 0, 0, tzinfo=vienna_timezone)
         is_afternoon, tab_labels = determine_tab_order(noon_time)
-        
+
         assert is_afternoon is True  # 12:00 is considered afternoon
         assert tab_labels[0] == "🚂 Wien Hbf → Bad Vöslau"
 
@@ -250,7 +252,7 @@ class TestDetermineTabOrder:
         """Test tab order at midnight"""
         midnight_time = datetime(2025, 7, 27, 0, 0, 0, tzinfo=vienna_timezone)
         is_afternoon, tab_labels = determine_tab_order(midnight_time)
-        
+
         assert is_afternoon is False  # 00:00 is considered morning
         assert tab_labels[0] == "🚂 Bad Vöslau → Wien Hbf"
 
@@ -258,7 +260,7 @@ class TestDetermineTabOrder:
         """Test tab order in late evening"""
         evening_time = datetime(2025, 7, 27, 23, 30, 0, tzinfo=vienna_timezone)
         is_afternoon, tab_labels = determine_tab_order(evening_time)
-        
+
         assert is_afternoon is True  # Still afternoon logic
         assert tab_labels[0] == "🚂 Wien Hbf → Bad Vöslau"
 
@@ -266,7 +268,7 @@ class TestDetermineTabOrder:
         """Test tab order with default current time (None parameter)"""
         # This should use current Vienna time
         is_afternoon, tab_labels = determine_tab_order(None)
-        
+
         assert isinstance(is_afternoon, bool)
         assert len(tab_labels) == 2
         assert all("🚂" in label for label in tab_labels)
@@ -285,32 +287,32 @@ class TestCalculateDelayIntegration:
                 "rt": {"dlt": "10:19"},  # 2 minute delay
                 "st": "Wien Hauptbahnhof",
                 "pr": "REX 3",
-                "tr": "1"
+                "tr": "1",
             },
             {
-                "ti": "10:47", 
+                "ti": "10:47",
                 # No real-time data - should be on time
                 "st": "Wien Hauptbahnhof",
                 "pr": "REX 3",
-                "tr": "2"
-            }
+                "tr": "2",
+            },
         ]
-        
-        with patch('app.st') as mock_st:
+
+        with patch("app.st") as mock_st:
             mock_st.warning = MagicMock()
             mock_st.dataframe = MagicMock()
             mock_st.column_config = MagicMock()
             mock_st.column_config.TextColumn = MagicMock()
-            
+
             create_train_table(trains, "Test")
-            
+
             call_args = mock_st.dataframe.call_args
             df = call_args[0][0]
-            
+
             # First train should show delay
             assert df.iloc[0]["Delay (min)"] == "2"
             assert df.iloc[0]["Actual"] == "10:19"
-            
+
             # Second train should show on time
             assert df.iloc[1]["Delay (min)"] == "—"
             assert df.iloc[1]["Actual"] == "✓ On time"
@@ -318,37 +320,49 @@ class TestCalculateDelayIntegration:
     def test_complex_delay_scenarios(self):
         """Test various complex delay scenarios"""
         test_cases = [
-            ("10:17", "10:17", 0, "✓ On time"),      # Exactly on time
-            ("10:17", "10:19", 2, "10:19"),          # 2 min delay
-            ("10:17", "10:32", 15, "10:32"),         # 15 min delay
-            ("09:58", "10:03", 5, "10:03"),          # Delay across hour
-            ("10:17", "10:15", -2, "10:15"),         # Early arrival (negative delay shows as no delay)
-            ("23:58", "00:02", -1436, "00:02"),      # Delay across midnight (negative due to simple time calc)
+            ("10:17", "10:17", 0, "✓ On time"),  # Exactly on time
+            ("10:17", "10:19", 2, "10:19"),  # 2 min delay
+            ("10:17", "10:32", 15, "10:32"),  # 15 min delay
+            ("09:58", "10:03", 5, "10:03"),  # Delay across hour
+            (
+                "10:17",
+                "10:15",
+                -2,
+                "10:15",
+            ),  # Early arrival (negative delay shows as no delay)
+            (
+                "23:58",
+                "00:02",
+                -1436,
+                "00:02",
+            ),  # Delay across midnight (negative due to simple time calc)
         ]
-        
+
         for scheduled, actual, expected_delay, expected_actual in test_cases:
-            trains = [{
-                "ti": scheduled,
-                "rt": {"dlt": actual} if actual != scheduled else None,
-                "st": "Wien Hauptbahnhof",
-                "pr": "REX 3",
-                "tr": "1"
-            }]
-            
-            with patch('app.st') as mock_st:
+            trains = [
+                {
+                    "ti": scheduled,
+                    "rt": {"dlt": actual} if actual != scheduled else None,
+                    "st": "Wien Hauptbahnhof",
+                    "pr": "REX 3",
+                    "tr": "1",
+                }
+            ]
+
+            with patch("app.st") as mock_st:
                 mock_st.warning = MagicMock()
                 mock_st.dataframe = MagicMock()
                 mock_st.column_config = MagicMock()
                 mock_st.column_config.TextColumn = MagicMock()
-                
+
                 create_train_table(trains, "Test")
-                
+
                 call_args = mock_st.dataframe.call_args
                 df = call_args[0][0]
-                
+
                 # Check actual time display
                 assert df.iloc[0]["Actual"] == expected_actual
-                
+
                 # Check delay display (only positive delays shown)
                 if expected_delay > 0:
                     assert df.iloc[0]["Delay (min)"] == str(expected_delay)

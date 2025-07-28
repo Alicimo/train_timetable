@@ -148,7 +148,7 @@ def create_train_table(trains: list[dict[str, Any]], direction_label: str) -> No
         # Handle None train objects
         if train is None:
             continue
-            
+
         scheduled_time = train.get("ti", "N/A")
         actual_time = (
             train.get("rt", {}).get("dlt") if train.get("rt") else scheduled_time
@@ -188,18 +188,20 @@ def create_train_table(trains: list[dict[str, Any]], direction_label: str) -> No
     )
 
 
-def get_direction_data(departures_data: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def get_direction_data(
+    departures_data: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Extract train data for both directions from departures data"""
     if not departures_data:
         return [], []
-    
+
     bad_voeslau_to_wien = departures_data.get("badVoeslauToWien", [])
     wien_to_bad_voeslau = departures_data.get("wienToBadVoeslau", [])
-    
+
     logger.debug(
         f"Successfully loaded {len(bad_voeslau_to_wien)} Bad Vöslau→Wien + {len(wien_to_bad_voeslau)} Wien→Bad Vöslau departures"
     )
-    
+
     return bad_voeslau_to_wien, wien_to_bad_voeslau
 
 
@@ -207,14 +209,12 @@ def format_last_updated_display(last_updated_str: str) -> str | None:
     """Format last updated timestamp for display in Vienna timezone"""
     if not last_updated_str:
         return None
-        
+
     try:
         vienna_tz = pytz.timezone("Europe/Vienna")
-        last_updated = datetime.fromisoformat(
-            last_updated_str.replace("Z", "+00:00")
-        )
+        last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
         last_updated_vienna = last_updated.astimezone(vienna_tz)
-        return last_updated_vienna.strftime('%H:%M:%S')
+        return last_updated_vienna.strftime("%H:%M:%S")
     except (ValueError, TypeError) as e:
         logger.warning(f"Could not parse lastUpdated timestamp: {e}")
         return None
@@ -225,22 +225,26 @@ def determine_tab_order(current_time: datetime | None = None) -> tuple[bool, lis
     if current_time is None:
         vienna_tz = pytz.timezone("Europe/Vienna")
         current_time = datetime.now(vienna_tz)
-    
+
     is_afternoon = current_time.hour >= 12
-    
+
     if is_afternoon:
         # After midday, show Wien → Bad Vöslau first (homebound traffic)
         tab_labels = ["🚂 Wien Hbf → Bad Vöslau", "🚂 Bad Vöslau → Wien Hbf"]
     else:
         # Morning: show Bad Vöslau → Wien first (work commute)
         tab_labels = ["🚂 Bad Vöslau → Wien Hbf", "🚂 Wien Hbf → Bad Vöslau"]
-    
+
     return is_afternoon, tab_labels
 
 
-def should_auto_refresh(departures_data: dict[str, Any] | None, refresh_interval: int = 60) -> bool:
+def should_auto_refresh(
+    departures_data: dict[str, Any] | None, refresh_interval: int = 60
+) -> bool:
     """Determine if data should be automatically refreshed"""
-    return departures_data is not None and is_data_stale(departures_data, refresh_interval)
+    return departures_data is not None and is_data_stale(
+        departures_data, refresh_interval
+    )
 
 
 def main() -> None:
@@ -288,7 +292,9 @@ def main() -> None:
 
         if departures_data:
             # Get train data for both directions
-            bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(departures_data)
+            bad_voeslau_to_wien, wien_to_bad_voeslau = get_direction_data(
+                departures_data
+            )
 
             # Display data freshness information
             last_updated_str = departures_data.get("lastUpdated", "")

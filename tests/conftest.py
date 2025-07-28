@@ -22,7 +22,7 @@ def sample_train_data() -> dict[str, Any]:
                 "rt": {"dlt": "10:19"},
                 "direction": "Wien Hauptbahnhof",
                 "delay": 120,
-                "cancelled": False
+                "cancelled": False,
             },
             {
                 "ti": "10:47",
@@ -31,7 +31,7 @@ def sample_train_data() -> dict[str, Any]:
                 "tr": "1",
                 "direction": "Wien Hauptbahnhof",
                 "delay": 0,
-                "cancelled": False
+                "cancelled": False,
             },
             {
                 "ti": "11:17",
@@ -41,8 +41,8 @@ def sample_train_data() -> dict[str, Any]:
                 "rt": {"dlt": "11:22"},
                 "direction": "Wien Hauptbahnhof",
                 "delay": 300,
-                "cancelled": False
-            }
+                "cancelled": False,
+            },
         ],
         "wienToBadVoeslau": [
             {
@@ -52,24 +52,24 @@ def sample_train_data() -> dict[str, Any]:
                 "tr": "3",
                 "direction": "Bad Vöslau",
                 "delay": 0,
-                "cancelled": False
+                "cancelled": False,
             },
             {
                 "ti": "16:00",
-                "st": "Bad Vöslau Bahnhof", 
+                "st": "Bad Vöslau Bahnhof",
                 "pr": "REX 3 (Zug-Nr. 19253)",
                 "tr": "3",
                 "rt": {"dlt": "16:03"},
                 "direction": "Bad Vöslau",
                 "delay": 180,
-                "cancelled": False
-            }
+                "cancelled": False,
+            },
         ],
         "lastUpdated": "2025-07-27T08:11:19.908Z",
         "stations": {
             "badVoeslau": {"name": "Bad Vöslau", "id": "1130603"},
-            "wienHbf": {"name": "Wien Hauptbahnhof", "id": "1291501"}
-        }
+            "wienHbf": {"name": "Wien Hauptbahnhof", "id": "1291501"},
+        },
     }
 
 
@@ -86,7 +86,7 @@ def old_format_train_data() -> dict[str, Any]:
                 "rt": {"dlt": "10:19"},
                 "direction": "Wien Hauptbahnhof",
                 "delay": 120,
-                "cancelled": False
+                "cancelled": False,
             },
             {
                 "ti": "10:47",
@@ -95,11 +95,11 @@ def old_format_train_data() -> dict[str, Any]:
                 "tr": "1",
                 "direction": "Wien Hauptbahnhof",
                 "delay": 0,
-                "cancelled": False
-            }
+                "cancelled": False,
+            },
         ],
         "lastUpdated": "2025-07-27T08:11:19.908Z",
-        "station": {"name": "Bad Vöslau", "id": "1130603"}
+        "station": {"name": "Bad Vöslau", "id": "1130603"},
     }
 
 
@@ -116,12 +116,12 @@ def malformed_train_data() -> dict[str, Any]:
                 "rt": {"dlt": "also-invalid"},
                 "direction": "Wien Hauptbahnhof",
                 "delay": "not-a-number",
-                "cancelled": "not-a-boolean"
+                "cancelled": "not-a-boolean",
             }
         ],
         "wienToBadVoeslau": [],
         "lastUpdated": "invalid-timestamp",
-        "stations": {}
+        "stations": {},
     }
 
 
@@ -134,8 +134,8 @@ def empty_train_data() -> dict[str, Any]:
         "lastUpdated": "2025-07-27T08:11:19.908Z",
         "stations": {
             "badVoeslau": {"name": "Bad Vöslau", "id": "1130603"},
-            "wienHbf": {"name": "Wien Hauptbahnhof", "id": "1291501"}
-        }
+            "wienHbf": {"name": "Wien Hauptbahnhof", "id": "1291501"},
+        },
     }
 
 
@@ -143,8 +143,10 @@ def empty_train_data() -> dict[str, Any]:
 def stale_train_data() -> dict[str, Any]:
     """Train data that is older than typical refresh interval"""
     # Create timestamp from 2 hours ago
-    stale_time = datetime.now(timezone.utc).replace(hour=datetime.now(timezone.utc).hour - 2)
-    
+    stale_time = datetime.now(timezone.utc).replace(
+        hour=datetime.now(timezone.utc).hour - 2
+    )
+
     return {
         "badVoeslauToWien": [
             {
@@ -154,26 +156,28 @@ def stale_train_data() -> dict[str, Any]:
                 "tr": "2",
                 "direction": "Wien Hauptbahnhof",
                 "delay": 0,
-                "cancelled": False
+                "cancelled": False,
             }
         ],
         "wienToBadVoeslau": [],
         "lastUpdated": stale_time.isoformat().replace("+00:00", "Z"),
         "stations": {
             "badVoeslau": {"name": "Bad Vöslau", "id": "1130603"},
-            "wienHbf": {"name": "Wien Hauptbahnhof", "id": "1291501"}
-        }
+            "wienHbf": {"name": "Wien Hauptbahnhof", "id": "1291501"},
+        },
     }
 
 
 @pytest.fixture
 def temp_json_file(tmp_path: Path):
     """Create a temporary JSON file for testing file operations"""
+
     def _create_temp_file(data: dict[str, Any]) -> Path:
         temp_file = tmp_path / "test_departures.json"
         with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         return temp_file
+
     return _create_temp_file
 
 
@@ -216,5 +220,5 @@ def minimal_valid_data() -> dict[str, Any]:
         "badVoeslauToWien": [],
         "wienToBadVoeslau": [],
         "lastUpdated": "",
-        "stations": {}
+        "stations": {},
     }

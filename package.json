@@ -11,9 +11,6 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "oebb-hafas": "^5.0.0"
-  },
-  "overrides": {
-    "hafas-client": "5.26.5"
+    "hafas-client": "^6.0.0"
   }
 }

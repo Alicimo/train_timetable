@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
-const hafas = require('oebb-hafas')('train-updates-app (github.com/user/train_updates)');
+const {createClient} = require('hafas-client');
+const {profile} = require('hafas-client/p/oebb/index.js');
 const fs = require('fs');
+
+const hafas = createClient(profile, 'train-updates-app (github.com/user/train_updates)');
 
 // Configuration constants
 const DEPARTURE_DURATION_HOURS = 2;

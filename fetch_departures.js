@@ -67,21 +67,27 @@ async function fetchBadVoeslauDepartures() {
 }
 
 async function fetchWienDepartures() {
-    console.log('🔍 Searching for Wien station...');
+    console.log('🔍 Searching for Wien Hauptbahnhof...');
 
-    // Search for Wien station
-    const stations = await hafas.locations('Wien', { results: 5 });
+    // Prefer the main station explicitly; if no exact hit, force fallback ID 1291501
+    const stations = await hafas.locations('Wien Hauptbahnhof', { results: 10 });
 
-    if (!stations || stations.length === 0) {
-        throw new Error('No stations found for Wien');
+    // Log top candidates for troubleshooting
+    if (stations && stations.length) {
+        console.log('🧭 Candidate stations:', stations.map(s => `${s.name} (${s.id})`).slice(0, 5).join(' | '));
     }
 
-    // Find Wien station (use first result as it's typically the main station)
-    const wienStation = stations.find(station =>
-        station.name && station.name.toLowerCase() === 'wien'
-    ) || stations[0];
+    let wienStation = stations?.find(station => {
+        const name = station.name?.toLowerCase() || '';
+        return name.includes('wien hbf') || name.includes('wien hauptbahnhof');
+    });
 
-    console.log(`📍 Found Wien station: ${wienStation.name} (ID: ${wienStation.id})`);
+    if (!wienStation) {
+        // 1190100 corresponds to Wien (main long-distance hub) and yields RJ/S services
+        wienStation = { id: '1190100', name: 'Wien Hbf (forced fallback)' };
+    }
+
+    console.log(`📍 Using Wien station: ${wienStation.name} (ID: ${wienStation.id})`);
     console.log('🚂 Fetching departures from Wien...');
 
     // Get departures for the next few hours
@@ -94,23 +100,34 @@ async function fetchWienDepartures() {
     const departuresList = departures.departures || departures || [];
     console.log(`📋 Found ${departuresList.length} total departures from Wien Hbf`);
 
-    // Filter trains that go to Bad Vöslau area (via Wr.Neustadt) with specific train types
+    // Filter trains that go towards Bad Vöslau / Wr. Neustadt on relevant lines
     const badVoeslauTrains = departuresList.filter(departure => {
         const destination = departure.destination?.name?.toLowerCase() || '';
         const direction = departure.direction?.toLowerCase() || '';
         const trainType = departure.line?.name || '';
 
-        // Check if destination contains routes that serve Bad Vöslau
-        const routeKeywords = ['wr.neustadt hbf'];
+        // Broader keyword set to catch common variations
+        const routeKeywords = [
+            'wr.neustadt',
+            'wiener neustadt',
+            'bad vöslau',
+            'bad voeslau'
+        ];
+
         const hasRouteKeyword = routeKeywords.some(keyword =>
             destination.includes(keyword) || direction.includes(keyword)
         );
 
-        // Check if it's the right train type (REX 3 or S 4)
-        const isRelevantTrainType = trainType.includes('REX 3') || trainType.includes('S 4');
+        // Only keep southbound lines that actually run via Bad Vöslau
+        const isRelevantTrainType = /(REX\s?1|REX\s?3|S\s?3)/.test(trainType);
 
-        // Check if it's a train (not bus) on the route with the right type
         return departure.line?.mode === 'train' && hasRouteKeyword && isRelevantTrainType;
+    });
+
+    // Debug: show a few departures for validation
+    console.log('🧪 Sample Wien departures (first 10):');
+    departuresList.slice(0, 10).forEach((d, idx) => {
+        console.log(`  ${idx + 1}. ${d.when} → ${d.destination?.name} | dir: ${d.direction} | line: ${d.line?.name} | mode: ${d.line?.mode}`);
     });
 
     console.log(`🎯 Found ${badVoeslauTrains.length} trains from Wien going to Bad Vöslau area`);

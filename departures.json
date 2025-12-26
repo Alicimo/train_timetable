@@ -1,0 +1,9 @@
+{
+  "badVoeslauToWien": [],
+  "wienToBadVoeslau": [],
+  "lastUpdated": "",
+  "stations": {
+    "badVoeslau": null,
+    "wienHbf": null
+  }
+}

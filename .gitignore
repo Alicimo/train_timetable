@@ -44,5 +44,3 @@ Thumbs.db
 # Log files
 *.log
 logs/
-
-departures.json

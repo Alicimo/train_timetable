@@ -3,7 +3,7 @@ name: Deploy train timetable to GitHub Pages
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: write
@@ -34,19 +34,15 @@ jobs:
       - name: Fetch departures
         run: node fetch_departures.js
 
-      - name: Commit departures data
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "chore: update departures data"
-          file_pattern: departures.json
-
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "."
+          path: |
+            index.html
+            departures.json
 
       - name: Deploy to GitHub Pages
         id: deployment

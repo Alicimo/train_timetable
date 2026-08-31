@@ -71,8 +71,7 @@
                 </div>
                 <div class="mt-3 small text-secondary">
                   Showing trains in both directions between Bad Vöslau and Wien
-                  Hauptbahnhof. This page polls the data file every minute;
-                  the JSON is rebuilt by CI roughly every 5 minutes.
+                  Hauptbahnhof. Live departure data refreshes every minute.
                 </div>
               </div>
             </div>
@@ -107,9 +106,8 @@
 
       <section class="mt-4">
         <div class="alert alert-info small mb-0">
-          <strong>Data source:</strong> ÖBB HAFAS via the bundled fetcher. GitLab CI
-          regenerates <code>departures.json</code> about every 5 minutes; this page
-          checks for a fresh file every 60 seconds.
+          <strong>Data source:</strong> ÖBB HAFAS via the train updates service.
+          Responses are briefly cached to avoid unnecessary upstream requests.
         </div>
       </section>
     </div>
@@ -121,7 +119,7 @@
     ></script>
     <script>
       const REFRESH_INTERVAL_MS = 60000;
-      const DATA_PATH = "departures.json";
+      const DATA_PATH = "/api/departures";
 
       const statusBadge = document.getElementById("statusBadge");
       const lastUpdated = document.getElementById("lastUpdated");
@@ -293,11 +291,12 @@
         updateStatus("text-bg-secondary", "Loading data...");
 
         try {
-          const response = await fetch(`${DATA_PATH}?t=${Date.now()}`);
+          const response = await fetch(DATA_PATH);
           if (!response.ok) {
             throw new Error(`Request failed with status ${response.status}`);
           }
 
+          const isStale = response.headers.get("X-Data-Stale") === "true";
           const data = await response.json();
 
           const badVoeslauToWien = data.badVoeslauToWien || [];
@@ -315,13 +314,15 @@
           const wienStation = data.stations?.wienHbf?.name ?? "Wien Hbf";
           stationInfo.textContent = `Stations: ${badStation} · ${wienStation}`;
 
-          updateStatus("text-bg-success", "Data loaded");
+          updateStatus(
+            isStale ? "text-bg-warning" : "text-bg-success",
+            isStale ? "Cached data · source unavailable" : "Live data",
+          );
         } catch (error) {
           updateStatus("text-bg-danger", "Failed to load data");
           tabContent.innerHTML = `
             <div class="alert alert-danger">
-              Unable to load departures. Make sure <code>departures.json</code> exists
-              by running <code>node fetch_departures.js</code>.
+              Unable to load departures from the train updates service.
             </div>
           `;
         }

@@ -2,9 +2,23 @@
 
 const {createClient} = require('hafas-client');
 const {profile} = require('hafas-client/p/oebb/index.js');
-const fs = require('fs');
 
-const hafas = createClient(profile, 'train-updates-app (github.com/user/train_updates)');
+const abortableProfile = {
+    ...profile,
+    transformReq(ctx, req) {
+        const transformedRequest = profile.transformReq
+            ? profile.transformReq(ctx, req)
+            : req;
+        return ctx.opt.signal
+            ? {...transformedRequest, signal: ctx.opt.signal}
+            : transformedRequest;
+    }
+};
+
+const hafas = createClient(
+    abortableProfile,
+    process.env.HAFAS_USER_AGENT || 'train-updates'
+);
 
 // Configuration constants
 const DEPARTURE_DURATION_HOURS = 2;
@@ -12,11 +26,11 @@ const WIEN_DEPARTURE_DURATION_HOURS = 2;
 const MAX_RESULTS_BAD_VOESLAU = 20;
 const MAX_RESULTS_WIEN = 100;
 
-async function fetchBadVoeslauDepartures() {
+async function fetchBadVoeslauDepartures(hafasClient, signal) {
     console.log('🔍 Searching for Bad Vöslau station...');
 
     // Search for Bad Vöslau station
-    const stations = await hafas.locations('Bad Vöslau', { results: 5 });
+    const stations = await hafasClient.locations('Bad Vöslau', {results: 5, signal});
 
     if (!stations || stations.length === 0) {
         throw new Error('No stations found for "Bad Vöslau"');
@@ -32,9 +46,10 @@ async function fetchBadVoeslauDepartures() {
     console.log('🚂 Fetching departures from Bad Vöslau...');
 
     // Get departures for the next few hours
-    const departures = await hafas.departures(badVoeslauStation.id, {
+    const departures = await hafasClient.departures(badVoeslauStation.id, {
         duration: DEPARTURE_DURATION_HOURS * 60, // Convert hours to minutes
-        results: MAX_RESULTS_BAD_VOESLAU
+        results: MAX_RESULTS_BAD_VOESLAU,
+        signal
     });
 
     // Handle different response formats
@@ -66,11 +81,11 @@ async function fetchBadVoeslauDepartures() {
     };
 }
 
-async function fetchWienDepartures() {
+async function fetchWienDepartures(hafasClient, signal) {
     console.log('🔍 Searching for Wien Hauptbahnhof...');
 
     // Prefer the main station explicitly; if no exact hit, force fallback ID 1291501
-    const stations = await hafas.locations('Wien Hauptbahnhof', { results: 10 });
+    const stations = await hafasClient.locations('Wien Hauptbahnhof', {results: 10, signal});
 
     // Log top candidates for troubleshooting
     if (stations && stations.length) {
@@ -91,9 +106,10 @@ async function fetchWienDepartures() {
     console.log('🚂 Fetching departures from Wien...');
 
     // Get departures for the next few hours
-    const departures = await hafas.departures(wienStation.id, {
+    const departures = await hafasClient.departures(wienStation.id, {
         duration: WIEN_DEPARTURE_DURATION_HOURS * 60, // Convert hours to minutes
-        results: MAX_RESULTS_WIEN
+        results: MAX_RESULTS_WIEN,
+        signal
     });
 
     // Handle different response formats
@@ -178,92 +194,49 @@ function transformTrainData(trains) {
     });
 }
 
-async function fetchDepartures() {
-    try {
-        // Fetch both directions
-        const [badVoeslauData, wienData] = await Promise.allSettled([
-            fetchBadVoeslauDepartures(),
-            fetchWienDepartures()
+function createDepartureFetcher(hafasClient) {
+    return async function fetchDepartures({signal} = {}) {
+        const [badVoeslauData, wienData] = await Promise.all([
+            fetchBadVoeslauDepartures(hafasClient, signal),
+            fetchWienDepartures(hafasClient, signal)
         ]);
 
-        // Handle Bad Vöslau → Wien results
-        let badVoeslauToWien = [];
-        let badVoeslauStation = null;
-        if (badVoeslauData.status === 'fulfilled') {
-            badVoeslauToWien = transformTrainData(badVoeslauData.value.trains);
-            badVoeslauStation = badVoeslauData.value.station;
-        } else {
-            console.error('❌ Error fetching Bad Vöslau departures:', badVoeslauData.reason.message);
-        }
+        const badVoeslauToWien = transformTrainData(badVoeslauData.trains);
+        const wienToBadVoeslau = transformTrainData(wienData.trains);
 
-        // Handle Wien → Bad Vöslau results
-        let wienToBadVoeslau = [];
-        let wienStation = null;
-        if (wienData.status === 'fulfilled') {
-            wienToBadVoeslau = transformTrainData(wienData.value.trains);
-            wienStation = wienData.value.station;
-        } else {
-            console.error('❌ Error fetching Wien departures:', wienData.reason.message);
-        }
-
-        // Create output structure with both directions
         const output = {
             badVoeslauToWien,
             wienToBadVoeslau,
             lastUpdated: new Date().toISOString(),
             stations: {
-                badVoeslau: badVoeslauStation ? {
-                    name: badVoeslauStation.name,
-                    id: badVoeslauStation.id
-                } : null,
-                wienHbf: wienStation ? {
-                    name: wienStation.name,
-                    id: wienStation.id
-                } : null
+                badVoeslau: {
+                    name: badVoeslauData.station.name,
+                    id: badVoeslauData.station.id
+                },
+                wienHbf: {
+                    name: wienData.station.name,
+                    id: wienData.station.id
+                }
             }
         };
 
-        // Write to JSON file
-        const outputFile = 'departures.json';
-        fs.writeFileSync(outputFile, JSON.stringify(output, null, 2));
-
-        console.log(`✅ Successfully saved train departures to ${outputFile}`);
-        console.log(`📅 Last updated: ${output.lastUpdated}`);
+        console.log(`✅ Fetched departures at ${output.lastUpdated}`);
         console.log(`🚂 Bad Vöslau → Wien: ${badVoeslauToWien.length} trains`);
         console.log(`🚂 Wien → Bad Vöslau: ${wienToBadVoeslau.length} trains`);
 
-        // Show examples from both directions
-        if (badVoeslauToWien.length > 0) {
-            console.log('\n📊 Sample Bad Vöslau → Wien departures:');
-            badVoeslauToWien.slice(0, 2).forEach((train, index) => {
-                const delayText = train.delay > 0 ? ` (+${train.delay / 60}min)` : '';
-                console.log(`  ${index + 1}. ${train.ti}${delayText} → ${train.st} (${train.pr})`);
-            });
-        }
-
-        if (wienToBadVoeslau.length > 0) {
-            console.log('\n📊 Sample Wien → Bad Vöslau departures:');
-            wienToBadVoeslau.slice(0, 2).forEach((train, index) => {
-                const delayText = train.delay > 0 ? ` (+${train.delay / 60}min)` : '';
-                console.log(`  ${index + 1}. ${train.ti}${delayText} → ${train.st} (${train.pr})`);
-            });
-        }
-
-        // Exit with error if no data was fetched successfully
-        if (badVoeslauToWien.length === 0 && wienToBadVoeslau.length === 0) {
-            console.error('❌ No train data was fetched successfully for either direction');
-            process.exit(1);
-        }
-
-    } catch (error) {
-        console.error('❌ Error fetching departures:', error.message);
-        process.exit(1);
-    }
+        return output;
+    };
 }
 
-// Run the script
+const fetchDepartures = createDepartureFetcher(hafas);
+
 if (require.main === module) {
-    fetchDepartures();
+    fetchDepartures()
+        .then((departures) => console.log(JSON.stringify(departures, null, 2)))
+        .catch((error) => {
+            console.error('❌ Error fetching departures:', error.message);
+            process.exitCode = 1;
+        });
 }
 
-module.exports = { fetchDepartures };
+module.exports = {createDepartureFetcher, fetchDepartures};

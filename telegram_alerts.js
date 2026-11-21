@@ -3,7 +3,7 @@ const {departureTiming} = require('./fetch_departures');
 const POLL_INTERVAL_MS = 60_000;
 const SEND_TIMEOUT_MS = 10_000;
 const ALERT_MEMORY_MS = 2 * 60 * 60 * 1_000;
-const MIN_DELAY_SECONDS = 5 * 60;
+const DELAY_STEP_SECONDS = 5 * 60;
 
 const directions = {
     badVoeslauToWien: 'Bad Vöslau → Wien Hbf',
@@ -15,22 +15,6 @@ const departureClock = new Intl.DateTimeFormat('de-AT', {
     minute: '2-digit',
     timeZone: 'Europe/Vienna'
 });
-
-function nextDeparture(trains, now) {
-    let next;
-    let nextAt = Infinity;
-
-    for (const train of trains) {
-        const timing = train[departureTiming];
-        const departureAt = train.cancelled ? timing?.plannedAt : timing?.expectedAt;
-        if (departureAt >= now && departureAt < nextAt) {
-            next = train;
-            nextAt = departureAt;
-        }
-    }
-
-    return next;
-}
 
 function createTelegramPoll({getDepartures, sendMessage, now, logger}) {
     const sentAlerts = new Map();
@@ -49,38 +33,59 @@ function createTelegramPoll({getDepartures, sendMessage, now, logger}) {
         }
 
         for (const [direction, route] of Object.entries(directions)) {
-            if (signal?.aborted) {
-                return;
-            }
+            for (const train of data[direction]) {
+                if (signal?.aborted) {
+                    return;
+                }
 
-            const train = nextDeparture(data[direction], checkedAt);
-            const timing = train?.[departureTiming];
-            if (!timing?.tripId || !Number.isFinite(timing.plannedAt)) {
-                continue;
-            }
+                const timing = train[departureTiming];
+                const departureAt = train.cancelled ? timing?.plannedAt : timing?.expectedAt;
+                if (!timing?.tripId || !Number.isFinite(timing.plannedAt)
+                    || !Number.isFinite(departureAt) || departureAt < checkedAt) {
+                    continue;
+                }
 
-            if (!train.cancelled && train.delay < MIN_DELAY_SECONDS) {
-                continue;
-            }
+                const key = JSON.stringify([direction, timing.tripId, timing.plannedAt]);
+                const previous = sentAlerts.get(key);
+                if (previous?.cancelled) {
+                    continue;
+                }
 
-            const key = JSON.stringify([direction, timing.tripId, timing.plannedAt]);
-            const previous = sentAlerts.get(key);
-            if (previous && (previous.cancelled || !train.cancelled)) {
-                continue;
-            }
+                const delay = Math.max(0, train.delay);
+                let disruption = 'cancelled';
+                if (!train.cancelled) {
+                    const delayBand = Math.floor(delay / DELAY_STEP_SECONDS);
+                    const previousDelay = previous?.delay ?? 0;
+                    const previousBand = Math.floor(previousDelay / DELAY_STEP_SECONDS);
+                    const increased = delayBand > previousBand;
+                    const decreased = previousDelay - delay >= DELAY_STEP_SECONDS;
+                    if (!increased && !decreased) {
+                        continue;
+                    }
 
-            const disruption = train.cancelled
-                ? 'cancelled'
-                : `delayed ${Math.floor(train.delay / 60)} min`;
-            const text = `${route} · ${train.pr} ${departureClock.format(timing.plannedAt)} · ${disruption}`;
-            try {
-                await sendMessage(text);
-                sentAlerts.set(key, {
-                    cancelled: train.cancelled,
-                    expiresAt: Math.max(timing.plannedAt, timing.expectedAt) + ALERT_MEMORY_MS
-                });
-            } catch {
-                logger.error('Telegram train alert failed');
+                    const minutes = Math.floor(delay / 60);
+                    if (!previous) {
+                        disruption = `delayed ${minutes} min`;
+                    } else if (delay === 0) {
+                        disruption = 'back on time';
+                    } else {
+                        const duration = minutes ? `${minutes} min` : 'under 1 min';
+                        disruption = increased ? `delay increased to ${duration}` : `delay decreased to ${duration}`;
+                    }
+                }
+                const text = `${route} · ${train.pr} ${departureClock.format(timing.plannedAt)} · ${disruption}`;
+                try {
+                    await sendMessage(text, signal);
+                    sentAlerts.set(key, {
+                        cancelled: train.cancelled,
+                        delay,
+                        expiresAt: Math.max(timing.plannedAt, timing.expectedAt) + ALERT_MEMORY_MS
+                    });
+                } catch {
+                    if (!signal?.aborted) {
+                        logger.error('Telegram train alert failed');
+                    }
+                }
             }
         }
     };
@@ -111,26 +116,15 @@ function startTelegramAlerts(options) {
     };
 }
 
-function telegramSenderFromEnv(env, request = fetch) {
-    const token = env.TELEGRAM_BOT_TOKEN?.trim();
-    const chatId = env.TELEGRAM_CHAT_ID?.trim();
-    if (!token && !chatId) {
-        return undefined;
-    }
-    if (!token || !chatId) {
-        throw new Error('Set both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to enable alerts');
-    }
-    if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) {
-        throw new Error('Invalid TELEGRAM_BOT_TOKEN format');
-    }
-
-    return async function sendMessage(text) {
-        const response = await request(`https://api.telegram.org/bot${token}/sendMessage`, {
+function createTelegramSender({botToken, chatId}, request = fetch) {
+    return async function sendMessage(text, signal) {
+        const timeout = AbortSignal.timeout(SEND_TIMEOUT_MS);
+        const response = await request(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({chat_id: chatId, text}),
             redirect: 'error',
-            signal: AbortSignal.timeout(SEND_TIMEOUT_MS)
+            signal: signal ? AbortSignal.any([signal, timeout]) : timeout
         });
         const result = await response.json();
         if (!response.ok || result?.ok !== true) {
@@ -139,4 +133,4 @@ function telegramSenderFromEnv(env, request = fetch) {
     };
 }
 
-module.exports = {createTelegramPoll, startTelegramAlerts, telegramSenderFromEnv};
+module.exports = {createTelegramPoll, startTelegramAlerts, createTelegramSender};

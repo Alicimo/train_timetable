@@ -25,6 +25,9 @@ yarn-error.log*
 .env.test
 .env.production
 
+# Local service state
+/.train-updates-state/
+
 # OS-specific files
 .DS_Store
 .DS_Store?

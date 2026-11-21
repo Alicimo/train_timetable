@@ -5,12 +5,14 @@ const http = require('http');
 const path = require('path');
 
 const {fetchDepartures} = require('./fetch_departures');
-const {startTelegramAlerts, telegramSenderFromEnv} = require('./telegram_alerts');
+const {startTelegramAlerts} = require('./telegram_alerts');
+const {createTelegramSettings, TelegramSettingsError} = require('./telegram_settings');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3000;
 const DEFAULT_CACHE_TTL_SECONDS = 60;
 const DEFAULT_HAFAS_TIMEOUT_SECONDS = 15;
+const SETTINGS_BODY_LIMIT = 4096;
 
 function createDepartureCache(
     loadDepartures,
@@ -81,6 +83,38 @@ function sendJson(res, statusCode, value, headers = {}) {
     }, JSON.stringify(value));
 }
 
+function isSameOriginWrite(req) {
+    const site = req.headers['sec-fetch-site'];
+    if (site) {
+        return site === 'same-origin';
+    }
+    const origin = req.headers.origin;
+    return !origin || origin === `https://${req.headers.host}` || origin === `http://${req.headers.host}`;
+}
+
+async function readSettingsBody(req) {
+    if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+        throw new TelegramSettingsError(415, 'Telegram settings require a JSON request.');
+    }
+
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of req.iterator({destroyOnReturn: false})) {
+        size += chunk.length;
+        if (size > SETTINGS_BODY_LIMIT) {
+            req.resume();
+            throw new TelegramSettingsError(413, 'Telegram settings request is too large.');
+        }
+        chunks.push(chunk);
+    }
+
+    try {
+        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    } catch {
+        throw new TelegramSettingsError(400, 'Telegram settings request contains invalid JSON.');
+    }
+}
+
 function createServer({
     loadDepartures = fetchDepartures,
     cacheTtlMs = DEFAULT_CACHE_TTL_SECONDS * 1000,
@@ -88,9 +122,21 @@ function createServer({
     now = Date.now,
     indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'),
     logger = console,
-    telegramSendMessage
+    telegramSendMessage,
+    telegramSettings
 } = {}) {
     const cache = createDepartureCache(loadDepartures, cacheTtlMs, now, refreshTimeoutMs);
+
+    let stopTelegramAlerts;
+    function applyTelegramSender(sendMessage) {
+        stopTelegramAlerts?.();
+        stopTelegramAlerts = sendMessage && startTelegramAlerts({
+            getDepartures: () => cache.get(),
+            sendMessage,
+            now,
+            logger
+        });
+    }
 
     const server = http.createServer(async (req, res) => {
         const requestUrl = new URL(req.url, 'http://localhost');
@@ -99,7 +145,7 @@ function createServer({
             send(res, 200, {
                 'Content-Type': 'text/html; charset=utf-8',
                 'Cache-Control': 'no-cache',
-                'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'",
+                'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'none'",
                 'Referrer-Policy': 'no-referrer'
             }, indexHtml);
             return;
@@ -107,6 +153,33 @@ function createServer({
 
         if (req.method === 'GET' && requestUrl.pathname === '/healthz') {
             sendJson(res, 200, {status: 'ok'});
+            return;
+        }
+
+        if (telegramSettings && requestUrl.pathname === '/api/telegram-settings') {
+            if (req.method === 'GET') {
+                sendJson(res, 200, telegramSettings.status());
+                return;
+            }
+            if (req.method === 'PUT') {
+                if (!isSameOriginWrite(req)) {
+                    sendJson(res, 403, {error: 'Open the train dashboard to update Telegram settings.'});
+                    return;
+                }
+                try {
+                    const input = await readSettingsBody(req);
+                    sendJson(res, 200, await telegramSettings.update(input, applyTelegramSender));
+                } catch (error) {
+                    if (error instanceof TelegramSettingsError) {
+                        sendJson(res, error.status, {error: error.message});
+                    } else {
+                        logger.error('Telegram settings request failed');
+                        sendJson(res, 500, {error: 'Could not update Telegram settings.'});
+                    }
+                }
+                return;
+            }
+            sendJson(res, 405, {error: 'Method not allowed'}, {Allow: 'GET, PUT'});
             return;
         }
 
@@ -127,17 +200,8 @@ function createServer({
         sendJson(res, 404, {error: 'Not found'});
     });
 
-    if (telegramSendMessage) {
-        server.on('listening', () => {
-            const stop = startTelegramAlerts({
-                getDepartures: () => cache.get(),
-                sendMessage: telegramSendMessage,
-                now,
-                logger
-            });
-            server.once('close', stop);
-        });
-    }
+    server.on('listening', () => applyTelegramSender(telegramSettings?.sender() ?? telegramSendMessage));
+    server.once('close', () => stopTelegramAlerts?.());
 
     return server;
 }
@@ -155,15 +219,18 @@ function readPositiveInteger(name, fallback) {
     return value;
 }
 
-if (require.main === module) {
+async function main() {
     const host = process.env.HOST || DEFAULT_HOST;
     const port = readPositiveInteger('PORT', DEFAULT_PORT);
     const cacheTtlSeconds = readPositiveInteger('CACHE_TTL_SECONDS', DEFAULT_CACHE_TTL_SECONDS);
     const hafasTimeoutSeconds = readPositiveInteger('HAFAS_TIMEOUT_SECONDS', DEFAULT_HAFAS_TIMEOUT_SECONDS);
+    const telegramSettings = await createTelegramSettings({
+        directory: process.env.STATE_DIRECTORY || path.resolve('.train-updates-state')
+    });
     const server = createServer({
         cacheTtlMs: cacheTtlSeconds * 1000,
         refreshTimeoutMs: hafasTimeoutSeconds * 1000,
-        telegramSendMessage: telegramSenderFromEnv(process.env)
+        telegramSettings
     });
 
     server.listen(port, host, () => {
@@ -173,6 +240,13 @@ if (require.main === module) {
     const shutdown = () => server.close(() => process.exit(0));
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
+}
+
+if (require.main === module) {
+    main().catch((error) => {
+        console.error(error);
+        process.exitCode = 1;
+    });
 }
 
 module.exports = {createDepartureCache, createServer};

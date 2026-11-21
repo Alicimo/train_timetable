@@ -1,9 +1,13 @@
 const assert = require('node:assert/strict');
 const {once} = require('node:events');
+const fs = require('node:fs/promises');
+const {tmpdir} = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {departureTiming} = require('./fetch_departures');
 const {createDepartureCache, createServer} = require('./server');
+const {createTelegramSettings} = require('./telegram_settings');
 
 const sampleDepartures = {
     badVoeslauToWien: [],
@@ -202,4 +206,167 @@ test('Telegram startup check and the departure API share an in-flight refresh', 
     const response = await responsePending;
     assert.deepEqual((await response.json()).badVoeslauToWien, [publicTrain]);
     assert.equal(loads, 1);
+});
+
+async function telegramFixture(t, env = {}, acceptsMessage = (message) => message.chat_id !== '-999') {
+    const directory = await fs.mkdtemp(path.join(tmpdir(), 'train-telegram-test-'));
+    t.after(() => fs.rm(directory, {recursive: true, force: true}));
+    const messages = [];
+    const options = {
+        directory,
+        env,
+        async request(url, {body}) {
+            const message = JSON.parse(body);
+            messages.push({url, ...message});
+            return Response.json({ok: acceptsMessage(message)});
+        }
+    };
+    async function start(extraServerOptions = {}) {
+        const baseUrl = await startTestServer(t, {
+            loadDepartures: async () => sampleDepartures,
+            telegramSettings: await createTelegramSettings(options),
+            ...extraServerOptions
+        });
+        const url = `${baseUrl}/api/telegram-settings`;
+        return {
+            status: async () => (await fetch(url)).json(),
+            save: (input, headers = {}) => fetch(url, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json', ...headers},
+                body: JSON.stringify(input)
+            })
+        };
+    }
+    return {start, messages, file: path.join(directory, 'telegram.json')};
+}
+
+test('configure, update, rotate, and re-enable Telegram using the dashboard API', async (t) => {
+    const {start, messages, file} = await telegramFixture(t);
+    const now = Date.parse(sampleDepartures.lastUpdated);
+    const api = await start({
+        now: () => now,
+        loadDepartures: async () => ({
+            ...sampleDepartures,
+            badVoeslauToWien: [{
+                pr: 'REX 1',
+                delay: 360,
+                cancelled: false,
+                [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
+            }]
+        })
+    });
+    assert.deepEqual(await api.status(), {enabled: false, chatId: null, hasToken: false});
+
+    const configured = {enabled: true, chatId: '-123', hasToken: true};
+    const setup = await api.save({enabled: true, chatId: '-123', botToken: '1:mock-token'});
+    assert.equal(setup.status, 200);
+    assert.deepEqual(await setup.json(), configured);
+    assert.equal(messages[0].text, 'Train updates · Telegram alerts test');
+    assert.match(messages[1].text, /delayed 6 min/);
+    assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+    assert.deepEqual(await (await start()).status(), configured);
+
+    const moved = await api.save({enabled: true, chatId: '-456'});
+    assert.equal(moved.status, 200);
+    assert.deepEqual(await moved.json(), {...configured, chatId: '-456'});
+    assert.equal(messages.at(-1).chat_id, '-456');
+    assert.match(messages.at(-1).url, /bot1:mock-token\/sendMessage$/);
+
+    const rotated = await api.save({enabled: true, chatId: '-456', botToken: '2:new-token'});
+    assert.equal(rotated.status, 200);
+    assert.match(messages.at(-1).url, /bot2:new-token\/sendMessage$/);
+
+    const beforeDisable = messages.length;
+    const disabled = await api.save({enabled: false});
+    assert.deepEqual(await disabled.json(), {enabled: false, chatId: '-456', hasToken: true});
+    assert.equal(messages.length, beforeDisable + 1);
+    assert.deepEqual(messages.at(-1), {
+        url: 'https://api.telegram.org/bot2:new-token/sendMessage',
+        chat_id: '-456',
+        text: 'Train updates · Telegram alerts have been disabled.'
+    });
+    assert.equal((await api.save({enabled: false})).status, 200);
+    assert.equal(messages.length, beforeDisable + 1);
+    const restarted = await start();
+    assert.deepEqual(await restarted.status(), {enabled: false, chatId: '-456', hasToken: true});
+    const reenabled = await restarted.save({enabled: true, chatId: '-456'});
+    assert.equal(reenabled.status, 200);
+    assert.match(messages.at(-1).url, /bot2:new-token\/sendMessage$/);
+});
+
+test('alerts stay disabled when Telegram rejects the disable confirmation', async (t) => {
+    const {start, messages} = await telegramFixture(t, {
+        TELEGRAM_BOT_TOKEN: '1:seed',
+        TELEGRAM_CHAT_ID: '123'
+    }, () => false);
+    const api = await start();
+    const response = await api.save({enabled: false});
+    assert.equal(response.status, 200);
+    const disabled = {enabled: false, chatId: '123', hasToken: true};
+    assert.deepEqual(await response.json(), {
+        ...disabled,
+        warning: 'Alerts are disabled, but Telegram could not deliver the confirmation.'
+    });
+    assert.match(messages[0].text, /alerts have been disabled/);
+    assert.deepEqual(await (await start()).status(), disabled);
+});
+
+test('persisted settings beat the deployment seed, including after disabling', async (t) => {
+    const {start, messages} = await telegramFixture(t, {
+        TELEGRAM_BOT_TOKEN: '1:seed',
+        TELEGRAM_CHAT_ID: '123'
+    });
+    const api = await start();
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true});
+    assert.equal(messages.length, 0);
+
+    assert.equal((await api.save({enabled: true, chatId: '456'})).status, 200);
+    assert.equal((await api.save({enabled: false})).status, 200);
+    assert.deepEqual(await (await start()).status(), {enabled: false, chatId: '456', hasToken: true});
+});
+
+test('failed test sends and failed writes preserve active settings', async (t) => {
+    const {start, file} = await telegramFixture(t, {
+        TELEGRAM_BOT_TOKEN: '1:seed',
+        TELEGRAM_CHAT_ID: '123'
+    });
+    const api = await start();
+    const original = await fs.readFile(file, 'utf8');
+    const rejected = await api.save({enabled: true, chatId: '-999', botToken: '2:rejected'});
+    assert.equal(rejected.status, 502);
+    assert.doesNotMatch(await rejected.text(), /2:rejected/);
+    assert.equal(await fs.readFile(file, 'utf8'), original);
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true});
+
+    await fs.rename(file, `${file}.backup`);
+    await fs.mkdir(file);
+    const failedWrite = await api.save({enabled: true, chatId: '-456'});
+    assert.equal(failedWrite.status, 500);
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true});
+});
+
+test('invalid seed and corrupt state leave the departure service usable and allow repair', async (t) => {
+    const {start, file} = await telegramFixture(t, {TELEGRAM_CHAT_ID: '123'});
+    const api = await start();
+    assert.match((await api.status()).issue, /initial Telegram settings are invalid/);
+
+    await fs.writeFile(file, '{bad JSON');
+    const restarted = await start();
+    const status = await restarted.status();
+    assert.equal(status.enabled, false);
+    assert.match(status.issue, /Could not read saved Telegram settings/);
+    assert.equal((await restarted.save({enabled: true, chatId: '456', botToken: '1:fixed'})).status, 200);
+    assert.deepEqual(await restarted.status(), {enabled: true, chatId: '456', hasToken: true});
+});
+
+test('Telegram settings reject cross-origin, oversized, and invalid writes', async (t) => {
+    const {start, messages} = await telegramFixture(t);
+    const api = await start();
+    const input = {enabled: true, chatId: '123', botToken: '1:mock'};
+    assert.equal((await api.save(input, {Origin: 'https://example.com'})).status, 403);
+    assert.equal((await api.save(input, {'Sec-Fetch-Site': 'same-site'})).status, 403);
+    assert.equal((await api.save(input, {'Content-Type': 'text/plain'})).status, 415);
+    assert.equal((await api.save({...input, botToken: 'b'.repeat(4096)})).status, 413);
+    assert.equal((await api.save({...input, chatId: 'not-a-chat'})).status, 400);
+    assert.deepEqual(messages, []);
 });

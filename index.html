@@ -104,6 +104,31 @@
         </div>
       </section>
 
+      <details class="card shadow-sm mt-4">
+        <summary class="card-header">Telegram alerts</summary>
+        <form id="telegramSettings" class="card-body">
+          <p id="telegramStatus" class="mb-3" role="status">Loading Telegram settings…</p>
+          <fieldset id="telegramFields" disabled>
+            <div class="mb-3">
+              <label for="telegramChatId" class="form-label">Chat ID</label>
+              <input id="telegramChatId" class="form-control" required maxlength="100"
+                autocomplete="off" spellcheck="false" aria-describedby="telegramChatHelp" />
+              <div id="telegramChatHelp" class="form-text">For a private chat, send a message to the bot first.</div>
+            </div>
+            <div class="mb-3">
+              <label for="telegramToken" class="form-label">Bot token</label>
+              <input id="telegramToken" type="password" class="form-control" maxlength="200"
+                autocomplete="new-password" spellcheck="false" />
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-primary" type="submit">Save and send test</button>
+              <button id="disableTelegram" class="btn btn-outline-secondary" type="button" disabled>Disable alerts</button>
+            </div>
+          </fieldset>
+          <p id="telegramFeedback" class="mb-0" role="status"></p>
+        </form>
+      </details>
+
       <section class="mt-4">
         <div class="alert alert-info small mb-0">
           <strong>Data source:</strong> ÖBB HAFAS via the train updates service.
@@ -166,6 +191,12 @@
         }).format(date);
       };
 
+      const escapeHtml = (value) => {
+        const element = document.createElement("span");
+        element.textContent = value;
+        return element.innerHTML;
+      };
+
       const buildTable = (trains) => {
         if (!trains || trains.length === 0) {
           return `<div class="alert alert-warning mb-0">No departures found.</div>`;
@@ -182,16 +213,16 @@
             const delay = formatDelay(scheduled, actual);
             const actualDisplay =
               actual !== scheduled
-                ? actual
+                ? escapeHtml(actual)
                 : '<span class="text-success">✓ On time</span>';
 
             return `
               <tr>
-                <td>${scheduled}</td>
+                <td>${escapeHtml(scheduled)}</td>
                 <td>${actualDisplay}</td>
                 <td>${delay}</td>
-                <td>${train.pr ?? "Unknown"}</td>
-                <td>${train.tr ?? "TBA"}</td>
+                <td>${escapeHtml(train.pr ?? "Unknown")}</td>
+                <td>${escapeHtml(train.tr ?? "TBA")}</td>
               </tr>
             `;
           })
@@ -328,6 +359,78 @@
         }
       };
 
+      const telegramSettingsPath = "/api/telegram-settings";
+      const telegramForm = document.getElementById("telegramSettings");
+      const telegramFields = document.getElementById("telegramFields");
+      const telegramStatus = document.getElementById("telegramStatus");
+      const telegramChatId = document.getElementById("telegramChatId");
+      const telegramToken = document.getElementById("telegramToken");
+      const disableTelegram = document.getElementById("disableTelegram");
+      const telegramFeedback = document.getElementById("telegramFeedback");
+
+      const showTelegramSettings = ({ enabled, chatId, hasToken, issue }) => {
+        telegramStatus.textContent = enabled ? "Alerts enabled" : "Alerts disabled";
+        telegramFeedback.textContent = issue ?? "";
+        telegramFeedback.className = issue ? "mt-3 mb-0 text-danger" : "mb-0";
+        telegramChatId.value = chatId ?? "";
+        telegramToken.value = "";
+        telegramToken.required = !hasToken;
+        telegramToken.placeholder = hasToken ? "Leave blank to keep the saved token" : "";
+        disableTelegram.disabled = !enabled;
+      };
+
+      const loadTelegramSettings = async () => {
+        try {
+          const response = await fetch(telegramSettingsPath);
+          if (!response.ok) {
+            throw new Error();
+          }
+          showTelegramSettings(await response.json());
+          telegramFields.disabled = false;
+        } catch {
+          telegramStatus.textContent = "Unable to load Telegram settings.";
+        }
+      };
+
+      const updateTelegramSettings = async (input) => {
+        telegramFields.disabled = true;
+        telegramFeedback.className = "mt-3 mb-0";
+        telegramFeedback.textContent = input.enabled ? "Sending test message…" : "Disabling alerts…";
+        try {
+          const response = await fetch(telegramSettingsPath, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+          });
+          const settings = await response.json();
+          if (!response.ok) {
+            telegramFeedback.className = "mt-3 mb-0 text-danger";
+            telegramFeedback.textContent = settings.error ?? "Unable to update Telegram settings.";
+            return;
+          }
+          showTelegramSettings(settings);
+          telegramFeedback.className = settings.warning ? "mt-3 mb-0 text-warning-emphasis" : "mt-3 mb-0 text-success";
+          telegramFeedback.textContent = settings.warning ??
+            (input.enabled ? "Test message sent and settings saved." : "Alerts disabled.");
+        } catch {
+          telegramFeedback.className = "mt-3 mb-0 text-danger";
+          telegramFeedback.textContent = "Unable to update Telegram settings.";
+        } finally {
+          telegramFields.disabled = false;
+        }
+      };
+
+      telegramForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        updateTelegramSettings({
+          enabled: true,
+          chatId: telegramChatId.value,
+          botToken: telegramToken.value,
+        });
+      });
+      disableTelegram.addEventListener("click", () => updateTelegramSettings({ enabled: false }));
+
+      loadTelegramSettings();
       loadDepartures();
       setInterval(loadDepartures, REFRESH_INTERVAL_MS);
     </script>

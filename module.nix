@@ -70,6 +70,8 @@ in
         RestartSec = 5;
 
         DynamicUser = true;
+        StateDirectory = "train-updates";
+        StateDirectoryMode = "0700";
         CapabilityBoundingSet = "";
         LockPersonality = true;
         NoNewPrivileges = true;

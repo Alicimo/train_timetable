@@ -45,6 +45,20 @@ The service accepts these environment variables:
 | `HAFAS_USER_AGENT` | `train-updates` | Application identifier sent to HAFAS |
 | `HAFAS_TIMEOUT_SECONDS` | `15` | Maximum duration of one HAFAS refresh |
 
+## Telegram alerts
+
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the service environment to enable
+alerts for one chat. For a private chat, start a conversation with the bot first.
+The service uses the same departure cache as the website. About once a minute it
+checks the next train in each direction and sends an alert for a cancellation or
+a delay of at least five minutes. Stale departure data does not trigger alerts.
+
+The service remembers successful sends in memory. A cancellation can follow an
+earlier delay alert, and restarting the service can repeat a recent alert.
+
+On NixOS, set `systemd.services.train-updates.serviceConfig.EnvironmentFile` to the
+path of a private runtime file containing the two variable assignments.
+
 ## Nix
 
 Run or build the packaged service directly:

@@ -25,6 +25,7 @@ const DEPARTURE_DURATION_HOURS = 2;
 const WIEN_DEPARTURE_DURATION_HOURS = 2;
 const MAX_RESULTS_BAD_VOESLAU = 20;
 const MAX_RESULTS_WIEN = 100;
+const departureTiming = Symbol('departureTiming');
 
 async function fetchBadVoeslauDepartures(hafasClient, signal) {
     console.log('🔍 Searching for Bad Vöslau station...');
@@ -160,7 +161,7 @@ function transformTrainData(trains) {
         const actualTime = departure.delay && scheduledTime ?
             new Date(scheduledTime.getTime() + (departure.delay * 1000)) : null;
 
-        return {
+        const train = {
             // Scheduled departure time in HH:MM format
             ti: scheduledTime ? scheduledTime.toLocaleTimeString('de-AT', {
                 hour: '2-digit',
@@ -191,6 +192,15 @@ function transformTrainData(trains) {
             delay: departure.delay || 0,
             cancelled: departure.cancelled || false
         };
+
+        Object.defineProperty(train, departureTiming, {
+            value: {
+                tripId: departure.tripId,
+                plannedAt: Date.parse(departure.plannedWhen),
+                expectedAt: Date.parse(departure.when ?? departure.plannedWhen)
+            }
+        });
+        return train;
     });
 }
 
@@ -239,4 +249,4 @@ if (require.main === module) {
         });
 }
 
-module.exports = {createDepartureFetcher, fetchDepartures};
+module.exports = {createDepartureFetcher, departureTiming, fetchDepartures};

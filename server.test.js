@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const {once} = require('node:events');
 const test = require('node:test');
 
+const {departureTiming} = require('./fetch_departures');
 const {createDepartureCache, createServer} = require('./server');
 
 const sampleDepartures = {
@@ -158,4 +159,47 @@ test('server aborts a timed-out initial refresh and reports failure', async (t) 
     assert.equal(response.status, 502);
     assert.deepEqual(await response.json(), {error: 'Unable to fetch departures'});
     assert.equal(aborted, true);
+});
+
+test('Telegram startup check and the departure API share an in-flight refresh', {timeout: 2000}, async (t) => {
+    const now = Date.parse(sampleDepartures.lastUpdated);
+    let loads = 0;
+    let finishLoad;
+    let finishAlert;
+    const pendingLoad = new Promise((resolve) => {
+        finishLoad = resolve;
+    });
+    const alert = new Promise((resolve) => {
+        finishAlert = resolve;
+    });
+    const server = createServer({
+        now: () => now,
+        loadDepartures() {
+            loads += 1;
+            return pendingLoad;
+        },
+        telegramSendMessage: finishAlert
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => server.close());
+
+    const requestSeen = once(server, 'request');
+    const responsePending = fetch(`http://127.0.0.1:${server.address().port}/api/departures`);
+    await requestSeen;
+    assert.equal(loads, 1);
+
+    const publicTrain = {pr: 'REX 1', delay: 360, cancelled: false};
+    finishLoad({
+        ...sampleDepartures,
+        badVoeslauToWien: [{
+            ...publicTrain,
+            [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
+        }]
+    });
+
+    assert.match(await alert, /delayed 6 min/);
+    const response = await responsePending;
+    assert.deepEqual((await response.json()).badVoeslauToWien, [publicTrain]);
+    assert.equal(loads, 1);
 });

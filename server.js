@@ -5,6 +5,7 @@ const http = require('http');
 const path = require('path');
 
 const {fetchDepartures} = require('./fetch_departures');
+const {startTelegramAlerts, telegramSenderFromEnv} = require('./telegram_alerts');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3000;
@@ -86,11 +87,12 @@ function createServer({
     refreshTimeoutMs = DEFAULT_HAFAS_TIMEOUT_SECONDS * 1000,
     now = Date.now,
     indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'),
-    logger = console
+    logger = console,
+    telegramSendMessage
 } = {}) {
     const cache = createDepartureCache(loadDepartures, cacheTtlMs, now, refreshTimeoutMs);
 
-    return http.createServer(async (req, res) => {
+    const server = http.createServer(async (req, res) => {
         const requestUrl = new URL(req.url, 'http://localhost');
 
         if (req.method === 'GET' && (requestUrl.pathname === '/' || requestUrl.pathname === '/index.html')) {
@@ -124,6 +126,20 @@ function createServer({
 
         sendJson(res, 404, {error: 'Not found'});
     });
+
+    if (telegramSendMessage) {
+        server.on('listening', () => {
+            const stop = startTelegramAlerts({
+                getDepartures: () => cache.get(),
+                sendMessage: telegramSendMessage,
+                now,
+                logger
+            });
+            server.once('close', stop);
+        });
+    }
+
+    return server;
 }
 
 function readPositiveInteger(name, fallback) {
@@ -146,7 +162,8 @@ if (require.main === module) {
     const hafasTimeoutSeconds = readPositiveInteger('HAFAS_TIMEOUT_SECONDS', DEFAULT_HAFAS_TIMEOUT_SECONDS);
     const server = createServer({
         cacheTtlMs: cacheTtlSeconds * 1000,
-        refreshTimeoutMs: hafasTimeoutSeconds * 1000
+        refreshTimeoutMs: hafasTimeoutSeconds * 1000,
+        telegramSendMessage: telegramSenderFromEnv(process.env)
     });
 
     server.listen(port, host, () => {

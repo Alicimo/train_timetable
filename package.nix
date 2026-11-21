@@ -19,6 +19,8 @@ buildNpmPackage {
       ./package.json
       ./server.js
       ./server.test.js
+      ./telegram_alerts.js
+      ./telegram_alerts.test.js
     ];
   };
 
@@ -38,7 +40,7 @@ buildNpmPackage {
     runHook preInstall
 
     mkdir -p "$out/bin" "$out/lib/train-updates"
-    cp fetch_departures.js index.html package.json server.js "$out/lib/train-updates/"
+    cp fetch_departures.js index.html package.json server.js telegram_alerts.js "$out/lib/train-updates/"
     cp -r node_modules "$out/lib/train-updates/"
     makeWrapper ${lib.getExe nodejs} "$out/bin/train-updates" \
       --add-flags "$out/lib/train-updates/server.js"

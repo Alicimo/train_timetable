@@ -29,7 +29,8 @@
       }
 
       button,
-      input {
+      input,
+      select {
         box-sizing: border-box;
         font: inherit;
       }
@@ -41,6 +42,7 @@
 
       button:focus-visible,
       input:focus-visible,
+      select:focus-visible,
       summary:focus-visible {
         outline: 2px solid var(--accent);
         outline-offset: 2px;
@@ -217,7 +219,8 @@
         font-weight: 600;
       }
 
-      .field input {
+      .field input,
+      .field select {
         display: block;
         inline-size: 100%;
         min-block-size: 44px;
@@ -258,8 +261,62 @@
         opacity: 0.55;
       }
 
-      #telegramFeedback {
+      #telegramFeedback,
+      #scheduleFeedback {
         margin: 0.75rem 0 0;
+      }
+
+      #notificationSchedule {
+        border-top: 1px solid var(--divider);
+        padding-top: 0.75rem;
+      }
+
+      .notification-days {
+        margin-bottom: 0.75rem;
+      }
+
+      .notification-days legend {
+        font-weight: 600;
+      }
+
+      .day-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0 0.75rem;
+      }
+
+      .day-options label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        min-block-size: 44px;
+        cursor: pointer;
+      }
+
+      .day-options input {
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
+      .window-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+        align-items: end;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .window-row .field {
+        margin-bottom: 0;
+      }
+
+      .window-direction {
+        grid-column: 1 / -1;
+      }
+
+      #scheduleHelp {
+        color: var(--muted);
+        font-size: 0.875rem;
       }
     </style>
   </head>
@@ -307,8 +364,50 @@
           </fieldset>
           <p id="telegramFeedback" role="status"></p>
         </form>
+        <form id="notificationSchedule">
+          <fieldset id="scheduleFields" disabled aria-describedby="scheduleHelp">
+            <fieldset class="notification-days">
+              <legend>Notification days</legend>
+              <div class="day-options">
+                <label><input type="checkbox" name="notificationDay" value="0" /> Mon</label>
+                <label><input type="checkbox" name="notificationDay" value="1" /> Tue</label>
+                <label><input type="checkbox" name="notificationDay" value="2" /> Wed</label>
+                <label><input type="checkbox" name="notificationDay" value="3" /> Thu</label>
+                <label><input type="checkbox" name="notificationDay" value="4" /> Fri</label>
+                <label><input type="checkbox" name="notificationDay" value="5" /> Sat</label>
+                <label><input type="checkbox" name="notificationDay" value="6" /> Sun</label>
+              </div>
+            </fieldset>
+            <p id="scheduleHelp">Alerts can be sent all day on selected days unless you add time windows.
+              Choose a direction for each window. Windows use Vienna time and can run past midnight from a selected day.
+              Clear all days to pause scheduled alerts.</p>
+            <div id="notificationWindows"></div>
+            <div class="form-actions">
+              <button id="addNotificationWindow" type="button">Add time window</button>
+              <button type="submit">Save schedule</button>
+            </div>
+          </fieldset>
+          <p id="scheduleFeedback" role="status"></p>
+        </form>
       </details>
     </main>
+
+    <template id="notificationWindow">
+      <div class="window-row" role="group" aria-label="Time window">
+        <label class="field window-direction">Direction
+          <select name="windowDirection">
+            <option value="both">Both directions</option>
+            <option value="badVoeslauToWien">Bad Vöslau → Wien Hbf</option>
+            <option value="wienToBadVoeslau">Wien Hbf → Bad Vöslau</option>
+          </select>
+        </label>
+        <label class="field">Start <input type="time" name="start" required /></label>
+        <label class="field">End <input type="time" name="end" required /></label>
+        <div class="form-actions">
+          <button type="button" aria-label="Remove time window">Remove</button>
+        </div>
+      </div>
+    </template>
 
     <template id="trainRow">
       <tr>
@@ -428,6 +527,38 @@
       const disableTelegram = document.getElementById("disableTelegram");
       const telegramFeedback = document.getElementById("telegramFeedback");
 
+      const scheduleForm = document.getElementById("notificationSchedule");
+      const scheduleFields = document.getElementById("scheduleFields");
+      const scheduleFeedback = document.getElementById("scheduleFeedback");
+      const notificationDays = scheduleForm.querySelectorAll('[name="notificationDay"]');
+      const notificationWindows = document.getElementById("notificationWindows");
+      const windowTemplate = document.getElementById("notificationWindow");
+      const addWindowButton = document.getElementById("addNotificationWindow");
+
+      const addNotificationWindow = ({ start = "", end = "", direction = "both" } = {}) => {
+        const row = windowTemplate.content.firstElementChild.cloneNode(true);
+        const startInput = row.querySelector('[name="start"]');
+        startInput.value = start;
+        row.querySelector('[name="end"]').value = end;
+        row.querySelector('[name="windowDirection"]').value = direction;
+        row.querySelector("button").addEventListener("click", () => {
+          row.remove();
+          addWindowButton.focus();
+        });
+        notificationWindows.append(row);
+        return startInput;
+      };
+
+      const showSchedule = ({ days, windows }) => {
+        for (const input of notificationDays) {
+          input.checked = days.includes(Number(input.value));
+        }
+        notificationWindows.replaceChildren();
+        for (const timeWindow of windows) {
+          addNotificationWindow(timeWindow);
+        }
+      };
+
       const showTelegramSettings = ({ enabled, chatId, hasToken, issue }) => {
         telegramStatus.textContent = enabled ? "Alerts enabled" : "Alerts disabled";
         telegramFeedback.textContent = issue ?? "";
@@ -445,11 +576,27 @@
           if (!response.ok) {
             throw new Error();
           }
-          showTelegramSettings(await response.json());
+          const settings = await response.json();
+          showTelegramSettings(settings);
+          showSchedule(settings.schedule);
           telegramFields.disabled = false;
+          scheduleFields.disabled = false;
         } catch {
           telegramStatus.textContent = "Unable to load Telegram settings.";
         }
+      };
+
+      const saveTelegramSettings = async (input) => {
+        const response = await fetch(telegramSettingsPath, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        const settings = await response.json();
+        if (!response.ok) {
+          return { error: settings.error ?? "Unable to update Telegram settings." };
+        }
+        return settings;
       };
 
       const updateTelegramSettings = async (input) => {
@@ -457,15 +604,10 @@
         telegramFeedback.className = "";
         telegramFeedback.textContent = input.enabled ? "Sending test message…" : "Disabling alerts…";
         try {
-          const response = await fetch(telegramSettingsPath, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(input),
-          });
-          const settings = await response.json();
-          if (!response.ok) {
+          const settings = await saveTelegramSettings(input);
+          if (settings.error) {
             telegramFeedback.className = "error-text";
-            telegramFeedback.textContent = settings.error ?? "Unable to update Telegram settings.";
+            telegramFeedback.textContent = settings.error;
             return;
           }
           showTelegramSettings(settings);
@@ -489,6 +631,32 @@
         });
       });
       disableTelegram.addEventListener("click", () => updateTelegramSettings({ enabled: false }));
+
+      addWindowButton.addEventListener("click", () => addNotificationWindow().focus());
+
+      scheduleForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const days = Array.from(notificationDays).filter((input) => input.checked)
+          .map((input) => Number(input.value));
+        const windows = Array.from(notificationWindows.children, (row) => ({
+          start: row.querySelector('[name="start"]').value,
+          end: row.querySelector('[name="end"]').value,
+          direction: row.querySelector('[name="windowDirection"]').value,
+        }));
+        scheduleFields.disabled = true;
+        scheduleFeedback.className = "";
+        scheduleFeedback.textContent = "Saving schedule…";
+        try {
+          const settings = await saveTelegramSettings({ schedule: { days, windows } });
+          scheduleFeedback.className = settings.error ? "error-text" : "success-text";
+          scheduleFeedback.textContent = settings.error ?? "Schedule saved.";
+        } catch {
+          scheduleFeedback.className = "error-text";
+          scheduleFeedback.textContent = "Unable to save the schedule.";
+        } finally {
+          scheduleFields.disabled = false;
+        }
+      });
 
       loadTelegramSettings();
       loadDepartures();

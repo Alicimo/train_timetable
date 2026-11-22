@@ -157,3 +157,37 @@ test('Telegram sender requires positive confirmation from the Bot API', async ()
     result = {ok: true};
     await send('Delay alert');
 });
+
+
+test('poll honors schedule changes during a refresh and keeps alert history', async () => {
+    let allowed = true;
+    let changeDuringRefresh = true;
+    const messages = [];
+    const poll = createTelegramPoll({
+        async getDepartures() {
+            if (changeDuringRefresh) {
+                allowed = false;
+            }
+            return {data: {
+                badVoeslauToWien: [departure('delayed', 10, 300)],
+                wienToBadVoeslau: []
+            }, stale: false};
+        },
+        allowsAlerts: () => allowed,
+        sendMessage: async (message) => messages.push(message),
+        now: () => now,
+        logger: console
+    });
+
+    await poll();
+    assert.equal(messages.length, 0);
+    changeDuringRefresh = false;
+    allowed = true;
+    await poll();
+    assert.equal(messages.length, 1);
+    allowed = false;
+    await poll();
+    allowed = true;
+    await poll();
+    assert.equal(messages.length, 1);
+});

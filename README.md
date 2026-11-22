@@ -59,6 +59,15 @@ your saved token. **Disable alerts** pauses notifications and keeps the saved
 credentials for the next time you enable them. The bot sends a confirmation to
 the saved chat. If delivery fails, the dashboard reports it and alerts stay off.
 
+In the same dropdown, choose **Notification days** and add time windows, then select **Save schedule**. Without windows, alerts can be sent all
+day on the selected days. Clear every day to pause scheduled alerts. Times use
+Europe/Vienna, including daylight saving. A window that ends earlier than it
+starts continues into the following day. Each window applies to the time an
+alert is sent and can cover either route direction or both. The service discards
+saved windows that have no direction. Schedules with no windows cover both
+directions all day on the selected days. Schedule changes take effect without
+restarting the service or sending a test message.
+
 The dashboard and its settings are intended for access over a private network
 such as Tailscale. Anyone who can reach the dashboard can change the alert settings.
 

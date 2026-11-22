@@ -134,6 +134,7 @@ function createServer({
         stopTelegramAlerts = sendMessage && startTelegramAlerts({
             getDepartures: () => cache.get(),
             sendMessage,
+            allowsAlerts: telegramSettings?.allowsAlerts,
             now,
             logger
         });

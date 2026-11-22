@@ -16,10 +16,13 @@ const departureClock = new Intl.DateTimeFormat('de-AT', {
     timeZone: 'Europe/Vienna'
 });
 
-function createTelegramPoll({getDepartures, sendMessage, now, logger}) {
+function createTelegramPoll({getDepartures, sendMessage, now, logger, allowsAlerts = () => true}) {
     const sentAlerts = new Map();
 
     return async function poll(signal) {
+        if (!allowsAlerts(now())) {
+            return;
+        }
         const {data, stale} = await getDepartures();
         if (stale || signal?.aborted) {
             return;
@@ -74,6 +77,9 @@ function createTelegramPoll({getDepartures, sendMessage, now, logger}) {
                     }
                 }
                 const text = `${route} · ${train.pr} ${departureClock.format(timing.plannedAt)} · ${disruption}`;
+                if (!allowsAlerts(now(), direction)) {
+                    break;
+                }
                 try {
                     await sendMessage(text, signal);
                     sentAlerts.set(key, {
@@ -133,4 +139,4 @@ function createTelegramSender({botToken, chatId}, request = fetch) {
     };
 }
 
-module.exports = {createTelegramPoll, startTelegramAlerts, createTelegramSender};
+module.exports = {createTelegramPoll, startTelegramAlerts, createTelegramSender, directions};

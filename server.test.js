@@ -9,6 +9,8 @@ const {departureTiming} = require('./fetch_departures');
 const {createDepartureCache, createServer} = require('./server');
 const {createTelegramSettings} = require('./telegram_settings');
 
+const defaultSchedule = {days: [0, 1, 2, 3, 4, 5, 6], windows: []};
+
 const sampleDepartures = {
     badVoeslauToWien: [],
     wienToBadVoeslau: [],
@@ -275,9 +277,9 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
             }]
         })
     });
-    assert.deepEqual(await api.status(), {enabled: false, chatId: null, hasToken: false});
+    assert.deepEqual(await api.status(), {enabled: false, chatId: null, hasToken: false, schedule: defaultSchedule});
 
-    const configured = {enabled: true, chatId: '-123', hasToken: true};
+    const configured = {enabled: true, chatId: '-123', hasToken: true, schedule: defaultSchedule};
     const setup = await api.save({enabled: true, chatId: '-123', botToken: '1:mock-token'});
     assert.equal(setup.status, 200);
     assert.deepEqual(await setup.json(), configured);
@@ -298,7 +300,7 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
 
     const beforeDisable = messages.length;
     const disabled = await api.save({enabled: false});
-    assert.deepEqual(await disabled.json(), {enabled: false, chatId: '-456', hasToken: true});
+    assert.deepEqual(await disabled.json(), {enabled: false, chatId: '-456', hasToken: true, schedule: defaultSchedule});
     assert.equal(messages.length, beforeDisable + 1);
     assert.deepEqual(messages.at(-1), {
         url: 'https://api.telegram.org/bot2:new-token/sendMessage',
@@ -308,7 +310,7 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
     assert.equal((await api.save({enabled: false})).status, 200);
     assert.equal(messages.length, beforeDisable + 1);
     const restarted = await start();
-    assert.deepEqual(await restarted.status(), {enabled: false, chatId: '-456', hasToken: true});
+    assert.deepEqual(await restarted.status(), {enabled: false, chatId: '-456', hasToken: true, schedule: defaultSchedule});
     const reenabled = await restarted.save({enabled: true, chatId: '-456'});
     assert.equal(reenabled.status, 200);
     assert.match(messages.at(-1).url, /bot2:new-token\/sendMessage$/);
@@ -322,7 +324,7 @@ test('alerts stay disabled when Telegram rejects the disable confirmation', asyn
     const api = await start();
     const response = await api.save({enabled: false});
     assert.equal(response.status, 200);
-    const disabled = {enabled: false, chatId: '123', hasToken: true};
+    const disabled = {enabled: false, chatId: '123', hasToken: true, schedule: defaultSchedule};
     assert.deepEqual(await response.json(), {
         ...disabled,
         warning: 'Alerts are disabled, but Telegram could not deliver the confirmation.'
@@ -337,12 +339,12 @@ test('persisted settings beat the deployment seed, including after disabling', a
         TELEGRAM_CHAT_ID: '123'
     });
     const api = await start();
-    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true});
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule});
     assert.equal(messages.length, 0);
 
     assert.equal((await api.save({enabled: true, chatId: '456'})).status, 200);
     assert.equal((await api.save({enabled: false})).status, 200);
-    assert.deepEqual(await (await start()).status(), {enabled: false, chatId: '456', hasToken: true});
+    assert.deepEqual(await (await start()).status(), {enabled: false, chatId: '456', hasToken: true, schedule: defaultSchedule});
 });
 
 test('failed test sends and failed writes preserve active settings', async (t) => {
@@ -356,13 +358,13 @@ test('failed test sends and failed writes preserve active settings', async (t) =
     assert.equal(rejected.status, 502);
     assert.doesNotMatch(await rejected.text(), /2:rejected/);
     assert.equal(await fs.readFile(file, 'utf8'), original);
-    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true});
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule});
 
     await fs.rename(file, `${file}.backup`);
     await fs.mkdir(file);
     const failedWrite = await api.save({enabled: true, chatId: '-456'});
     assert.equal(failedWrite.status, 500);
-    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true});
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule});
 });
 
 test('invalid seed and corrupt state leave the departure service usable and allow repair', async (t) => {
@@ -376,7 +378,7 @@ test('invalid seed and corrupt state leave the departure service usable and allo
     assert.equal(status.enabled, false);
     assert.match(status.issue, /Could not read saved Telegram settings/);
     assert.equal((await restarted.save({enabled: true, chatId: '456', botToken: '1:fixed'})).status, 200);
-    assert.deepEqual(await restarted.status(), {enabled: true, chatId: '456', hasToken: true});
+    assert.deepEqual(await restarted.status(), {enabled: true, chatId: '456', hasToken: true, schedule: defaultSchedule});
 });
 
 test('Telegram settings reject cross-origin, oversized, and invalid writes', async (t) => {
@@ -389,4 +391,99 @@ test('Telegram settings reject cross-origin, oversized, and invalid writes', asy
     assert.equal((await api.save({...input, botToken: 'b'.repeat(4096)})).status, 413);
     assert.equal((await api.save({...input, chatId: 'not-a-chat'})).status, 400);
     assert.deepEqual(messages, []);
+});
+
+
+test('schedule updates preserve legacy Telegram settings and persist without sending a test', async (t) => {
+    const {start, messages, file} = await telegramFixture(t);
+    await fs.writeFile(file, JSON.stringify({enabled: true, chatId: '123', botToken: '1:legacy'}));
+    const api = await start();
+    assert.deepEqual(await api.status(), {
+        enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule
+    });
+
+    const schedule = {days: [0], windows: [
+        {start: '07:00', end: '09:00', direction: 'badVoeslauToWien'},
+        {start: '16:00', end: '18:00', direction: 'wienToBadVoeslau'}
+    ]};
+    const result = await api.save({schedule});
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), {enabled: true, chatId: '123', hasToken: true, schedule});
+    assert.deepEqual(messages, []);
+    assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).botToken, '1:legacy');
+
+    for (const invalid of [
+        null,
+        {days: [7], windows: []},
+        {days: [0], windows: [{start: '24:00', end: '08:00'}]},
+        {days: [0], windows: [{start: '08:00', end: '08:00'}]},
+        {days: [0], windows: [{start: '08:00', end: '09:00'}]},
+        {days: [0], windows: [{start: '08:00', end: '09:00', direction: 'unknown'}]}
+    ]) {
+        assert.equal((await api.save({schedule: invalid})).status, 400);
+    }
+    assert.deepEqual((await (await start()).status()).schedule, schedule);
+
+    assert.equal((await api.save({enabled: false})).status, 200);
+    const paused = {days: [], windows: []};
+    assert.equal((await api.save({schedule: paused})).status, 200);
+    assert.deepEqual(await api.status(), {enabled: false, chatId: '123', hasToken: true, schedule: paused});
+    assert.equal((await api.save({enabled: true, chatId: '123'})).status, 200);
+    assert.deepEqual((await api.status()).schedule, paused);
+    assert.deepEqual(messages.map(({text}) => text), [
+        'Train updates · Telegram alerts have been disabled.',
+        'Train updates · Telegram alerts test'
+    ]);
+});
+
+test('saved notification windows filter alerts by direction and Vienna local time', async (t) => {
+    const {start, messages, file} = await telegramFixture(t);
+    const schedule = {
+        days: [6],
+        windows: [
+            {start: '07:00', end: '09:00', direction: 'badVoeslauToWien'},
+            {start: '13:00', end: '14:00'},
+            {start: '15:00', end: '16:00', direction: 'both'},
+            {start: '22:00', end: '02:00', direction: 'wienToBadVoeslau'}
+        ]
+    };
+    await fs.writeFile(file, JSON.stringify({enabled: true, chatId: '123', botToken: '1:legacy', schedule}));
+    const inbound = 'Bad Vöslau → Wien Hbf';
+    const outbound = 'Wien Hbf → Bad Vöslau';
+
+    for (const [timestamp, expectedRoutes] of [
+        ['2026-08-30T04:59:59Z', []], // Sunday 06:59:59
+        ['2026-08-30T05:00:00Z', [inbound]], // Sunday 07:00 in summer
+        ['2026-11-22T06:00:00Z', [inbound]], // Sunday 07:00 in winter
+        ['2026-08-30T07:00:00Z', []], // Sunday 09:00
+        ['2026-08-30T11:00:00Z', []], // Sunday 13:00, discarded window
+        ['2026-08-30T13:00:00Z', [inbound, outbound]], // Sunday 15:00
+        ['2026-08-30T21:00:00Z', [outbound]], // Sunday 23:00
+        ['2026-08-30T23:59:59Z', [outbound]], // Monday 01:59:59
+        ['2026-08-31T00:00:00Z', []], // Monday 02:00
+        ['2026-08-31T05:00:00Z', []] // Monday 07:00
+    ]) {
+        messages.length = 0;
+        const now = Date.parse(timestamp);
+        const train = {
+            pr: 'REX 1',
+            delay: 360,
+            cancelled: false,
+            [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
+        };
+        let polled = false;
+        const restarted = await start({
+            now: () => now,
+            async loadDepartures() {
+                polled = true;
+                return {...sampleDepartures, badVoeslauToWien: [train], wienToBadVoeslau: [train]};
+            }
+        });
+        const status = await restarted.status();
+        assert.deepEqual(status.schedule, {
+            days: [6], windows: schedule.windows.filter((window) => window.direction)
+        });
+        assert.equal(polled, expectedRoutes.length > 0, timestamp);
+        assert.deepEqual(messages.map(({text}) => text.split(' · ')[0]), expectedRoutes, timestamp);
+    }
 });

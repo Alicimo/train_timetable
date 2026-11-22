@@ -12,6 +12,7 @@ buildNpmPackage {
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
+      ./apple-touch-icon.png
       ./fetch_departures.js
       ./fetch_departures.test.js
       ./index.html
@@ -41,7 +42,7 @@ buildNpmPackage {
     runHook preInstall
 
     mkdir -p "$out/bin" "$out/lib/train-updates"
-    cp fetch_departures.js index.html package.json server.js telegram_alerts.js telegram_settings.js "$out/lib/train-updates/"
+    cp apple-touch-icon.png fetch_departures.js index.html package.json server.js telegram_alerts.js telegram_settings.js "$out/lib/train-updates/"
     cp -r node_modules "$out/lib/train-updates/"
     makeWrapper ${lib.getExe nodejs} "$out/bin/train-updates" \
       --add-flags "$out/lib/train-updates/server.js"

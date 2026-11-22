@@ -126,6 +126,7 @@ function createServer({
     telegramSettings
 } = {}) {
     const cache = createDepartureCache(loadDepartures, cacheTtlMs, now, refreshTimeoutMs);
+    const appleTouchIcon = fs.readFileSync(path.join(__dirname, 'apple-touch-icon.png'));
 
     let stopTelegramAlerts;
     function applyTelegramSender(sendMessage) {
@@ -148,6 +149,14 @@ function createServer({
                 'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'none'",
                 'Referrer-Policy': 'no-referrer'
             }, indexHtml);
+            return;
+        }
+
+        if (req.method === 'GET' && requestUrl.pathname === '/apple-touch-icon.png') {
+            send(res, 200, {
+                'Content-Type': 'image/png',
+                'Cache-Control': 'no-cache'
+            }, appleTouchIcon);
             return;
         }
 

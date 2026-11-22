@@ -107,6 +107,26 @@ test('server exposes the page, health check, and departure API', async (t) => {
     assert.equal(missingResponse.status, 404);
 });
 
+test('dashboard links to a 180×180 iOS Home Screen icon', async (t) => {
+    const baseUrl = await startTestServer(t);
+
+    for (const pagePath of ['/', '/index.html']) {
+        const response = await fetch(new URL(pagePath, baseUrl));
+        assert.equal(response.status, 200);
+        assert.match(await response.text(),
+            /<link rel="apple-touch-icon" sizes="180x180" href="\/apple-touch-icon\.png" \/>/);
+    }
+
+    const icon = await fetch(new URL('/apple-touch-icon.png', baseUrl));
+    assert.equal(icon.status, 200);
+    assert.equal(icon.headers.get('content-type'), 'image/png');
+    const png = Buffer.from(await icon.arrayBuffer());
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(png.toString('ascii', 12, 16), 'IHDR');
+    assert.equal(png.readUInt32BE(16), 180);
+    assert.equal(png.readUInt32BE(20), 180);
+});
+
 test('server serves stale data when a timed-out refresh follows a success', async (t) => {
     let currentTime = 0;
     let calls = 0;

@@ -5,7 +5,7 @@
 - The deployed application is the Node.js service in `server.js`. It serves `index.html`,
   `/api/departures`, and `/healthz` from one process.
 - `fetch_departures.js` contains the ÖBB HAFAS queries and returns the JSON response. When
-  run directly, it performs one live query and prints JSON to stdout.
+  run directly, it fetches one live snapshot and prints JSON to stdout.
 - Departures are cached in memory. There is no generated `departures.json`, scheduled CI
   refresh, frontend build step, or persistent departure data. Telegram settings are stored separately.
 - `pyproject.toml`, `uv.lock`, and `.python-version` are remnants of the removed Python
@@ -28,8 +28,9 @@
 - Preserve the JSON contract consumed by `index.html`: `badVoeslauToWien`,
   `wienToBadVoeslau`, `lastUpdated`, and `stations`; train rows use compact keys such as
   `ti`, `st`, `pr`, `tr`, and optional `rt.dlt`.
-- Southbound results are intentionally restricted to `REX 1`, `REX 3`, and `S 3` trains
-  whose direction or destination matches the Bad Vöslau/Wiener Neustadt route.
+- Both directions use paginated HAFAS journey searches for direct trains between Bad
+  Vöslau Bahnhof (`8100708`) and Wien Hbf (`8103000`). Journey legs may also use
+  `8101590` for Vienna platforms 1–2.
 - The cache coalesces concurrent refreshes and serves its last successful response as
   stale data when HAFAS is temporarily unavailable. An initial upstream failure returns
   HTTP 502.

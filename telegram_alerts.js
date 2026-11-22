@@ -47,11 +47,11 @@ function createTelegramPoll({getDepartures, sendMessage, now, logger}) {
 
                 const key = JSON.stringify([direction, timing.tripId, timing.plannedAt]);
                 const previous = sentAlerts.get(key);
-                if (previous?.cancelled) {
+                if (previous?.cancelled || (!train.cancelled && !Number.isFinite(train.delay))) {
                     continue;
                 }
 
-                const delay = Math.max(0, train.delay);
+                const delay = train.cancelled ? 0 : Math.max(0, train.delay);
                 let disruption = 'cancelled';
                 if (!train.cancelled) {
                     const delayBand = Math.floor(delay / DELAY_STEP_SECONDS);

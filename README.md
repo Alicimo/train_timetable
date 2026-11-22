@@ -7,8 +7,12 @@ A small web service showing live departures between Bad Vöslau and Wien Hauptba
 The Node.js service serves both the static interface and a live JSON endpoint:
 
 - `GET /` serves `index.html`.
-- `GET /api/departures` queries ÖBB HAFAS and returns filtered departures.
+- `GET /api/departures` returns upcoming direct trains from ÖBB HAFAS journey searches.
 - `GET /healthz` reports whether the service process is available.
+
+The service queries Bad Vöslau Bahnhof (`8100708`) and Wien Hbf (`8103000`) in both
+directions and accepts both Vienna platform groups. It follows journey pages through
+the two-hour window and searches 30 minutes back for trains still due to depart.
 
 Successful HAFAS responses are cached in memory for 60 seconds by default. Concurrent
 requests share one refresh, and the last successful response is served as stale data if
@@ -32,7 +36,7 @@ curl http://127.0.0.1:3000/healthz
 curl http://127.0.0.1:3000/api/departures
 ```
 
-`node fetch_departures.js` performs one live HAFAS request and prints the resulting JSON
+`node fetch_departures.js` fetches one live snapshot from HAFAS and prints the resulting JSON
 without starting the web service.
 
 The service accepts these environment variables:
@@ -59,13 +63,13 @@ The dashboard and its settings are intended for access over a private network
 such as Tailscale. Anyone who can reach the dashboard can change the alert settings.
 
 The service uses the same departure cache as the website. About once a minute it
-checks all upcoming trains returned for both directions. The fetch requests two
-hours of departures per direction. The bot sends an initial alert for a
+checks all upcoming trains returned for both directions. The snapshot covers two hours of scheduled
+departures per direction and includes recently scheduled trains still due to depart. The bot sends an initial alert for a
 cancellation or a delay of at least five minutes. For a reported delay, it sends
 an update when the delay reaches a higher five-minute band or drops by at least
 five minutes from the last reported delay. A train going from 10 to 9 minutes late
 does not trigger an update. A cancellation can follow a delay alert. Stale
-departure data does not trigger alerts.
+departure data and unknown delay values do not trigger delay alerts.
 The service remembers successful sends in memory, so restarting the service or
 changing the destination can repeat a recent alert.
 
@@ -131,4 +135,5 @@ for Telegram settings.
 
 The departure API returns `badVoeslauToWien`, `wienToBadVoeslau`, `lastUpdated`, and
 `stations`. Train rows use compact display keys such as `ti`, `st`, `pr`, `tr`, and the
-optional real-time departure value `rt.dlt`.
+optional expected departure value `rt.dlt`. The `ti` field holds the scheduled time,
+and `delay` is in seconds or `null` when HAFAS has no delay estimate.

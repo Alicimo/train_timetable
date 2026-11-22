@@ -83,6 +83,8 @@ test('delay increases cross five-minute marks and decreases require a five-minut
     await reportDelay(301);
     assert.equal(messages.length, 2);
     await reportDelay(300);
+    await reportDelay(null);
+    assert.equal(messages.length, 3);
     await reportDelay(0);
     await reportDelay(0);
     await reportDelay(1260);

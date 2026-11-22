@@ -3,106 +3,128 @@ const test = require('node:test');
 
 const {createDepartureFetcher, departureTiming} = require('./fetch_departures');
 
-test('departure fetcher preserves the API contract and route filters', async () => {
+const now = Date.parse('2026-08-31T10:00:00+02:00');
+const bad = {id: '8100708', name: 'Bad Vöslau Bahnhof'};
+const wien = {id: '8103000', name: 'Wien Hbf'};
+const wienPlatformsOneAndTwo = {id: '8101590', name: 'Wien Hbf (Bahnsteige 1-2)'};
+const time = (clock) => `2026-08-31T${clock}:00+02:00`;
+
+function journey(clock, overrides = {}) {
+    return {
+        legs: [{
+            tripId: clock,
+            plannedDeparture: time(clock),
+            departure: time(clock),
+            origin: bad,
+            destination: wien,
+            line: {name: 'REX 1', mode: 'train'},
+            ...overrides
+        }]
+    };
+}
+
+test('journey fetcher paginates the window and returns direct trains from both Vienna platform groups', async () => {
+    const signal = new AbortController().signal;
+    const calls = [];
+    const delayed = journey('09:58', {
+        destination: wienPlatformsOneAndTwo,
+        departure: time('10:03'),
+        departureDelay: 300,
+        departurePlatform: '2',
+        direction: 'Flughafen Wien'
+    });
+    const cancelled = journey('11:53', {departure: null, departureDelay: null, cancelled: true});
+    const wienToBad = journey('10:08', {
+        origin: wienPlatformsOneAndTwo,
+        destination: bad,
+        line: {name: 'S 80', mode: 'train'},
+        direction: 'Wr.Neustadt Hbf'
+    });
+
     const client = {
-        async locations(query, options) {
-            assert.ok(options.signal);
-            return query === 'Bad Vöslau'
-                ? [{name: 'Bad Vöslau', id: 'bad'}]
-                : [{name: 'Wien Hbf', id: 'wien'}];
-        },
-        async departures(stationId, options) {
-            assert.ok(options.signal);
-            if (stationId === 'bad') {
+        async journeys(from, to, options) {
+            calls.push([from, to, options.laterThan]);
+            assert.equal(options.signal, signal);
+            assert.equal(options.transfers, 0);
+            assert.deepEqual(options.products, {bus: false, subway: false, tram: false, ferry: false, onCall: false});
+            if (!options.laterThan) {
+                assert.equal(+options.departure, Date.parse(time('09:30')));
+            } else {
+                assert.ok(!('departure' in options));
+            }
+
+            if (from === wien.id) {
+                return {journeys: [wienToBad]};
+            }
+            if (options.laterThan === 'page-2') {
                 return {
-                    departures: [
-                        {
-                            tripId: 'train-1',
-                            plannedWhen: '2026-08-31T09:58:00+02:00',
-                            when: '2026-08-31T10:00:00+02:00',
-                            destination: {name: 'Wien Hbf'},
-                            direction: 'Wien Hbf',
-                            line: {name: 'REX 1', mode: 'train'},
-                            platform: '2',
-                            delay: 120
-                        },
-                        {
-                            when: '2026-08-31T10:05:00+02:00',
-                            destination: {name: 'Wien'},
-                            direction: 'Wien',
-                            line: {name: 'Bus 1', mode: 'bus'}
-                        }
-                    ]
+                    journeys: [delayed, cancelled, journey('12:00')],
+                    laterRef: 'unused'
                 };
             }
 
+            const trainWithTransfer = journey('10:16');
+            trainWithTransfer.legs.push(journey('10:45').legs[0]);
             return {
-                departures: [
-                    {
-                        when: '2026-08-31T11:00:00+02:00',
-                        destination: {name: 'Wr.Neustadt Hbf'},
-                        direction: 'Wr.Neustadt Hbf',
-                        line: {name: 'REX 1', mode: 'train'},
-                        platform: '4'
-                    },
-                    {
-                        when: '2026-08-31T11:05:00+02:00',
-                        destination: {name: 'Wr.Neustadt Hbf'},
-                        direction: 'Wr.Neustadt Hbf',
-                        line: {name: 'S 4', mode: 'train'}
-                    },
-                    {
-                        tripId: 'cancelled-train',
-                        plannedWhen: '2026-08-31T11:08:00+02:00',
-                        when: null,
-                        cancelled: true,
-                        destination: {name: 'Wr.Neustadt Hbf'},
-                        line: {name: 'REX 3', mode: 'train'}
-                    },
-                    {
-                        when: '2026-08-31T11:10:00+02:00',
-                        destination: {name: 'Graz Hbf'},
-                        direction: 'Graz Hbf',
-                        line: {name: 'REX 1', mode: 'train'}
-                    }
-                ]
+                journeys: [
+                    journey('09:50'),
+                    delayed,
+                    journey('10:05', {destination: {id: 'wien-other', name: 'Other station'}}),
+                    journey('10:10', {line: {name: 'Bus', mode: 'bus'}}),
+                    trainWithTransfer,
+                    journey('10:50', {departureDelay: 0})
+                ],
+                laterRef: 'page-2'
             };
         }
     };
-    const fetchDepartures = createDepartureFetcher(client);
-    const result = await fetchDepartures({signal: new AbortController().signal});
 
-    assert.deepEqual(Object.keys(result), [
-        'badVoeslauToWien',
-        'wienToBadVoeslau',
-        'lastUpdated',
-        'stations'
+    const fetchDepartures = createDepartureFetcher(client, () => now);
+    const result = await fetchDepartures({signal});
+    assert.deepEqual(calls, [
+        [bad.id, wien.id, undefined],
+        [wien.id, bad.id, undefined],
+        [bad.id, wien.id, 'page-2']
     ]);
-    assert.deepEqual(result.stations, {
-        badVoeslau: {name: 'Bad Vöslau', id: 'bad'},
-        wienHbf: {name: 'Wien Hbf', id: 'wien'}
-    });
-    assert.equal(result.badVoeslauToWien.length, 1);
-    assert.deepEqual(result.badVoeslauToWien[0], {
-        ti: '10:00',
-        st: 'Wien Hbf',
+    assert.deepEqual(Object.keys(result), [
+        'badVoeslauToWien', 'wienToBadVoeslau', 'lastUpdated', 'stations'
+    ]);
+    assert.deepEqual(result.stations, {badVoeslau: bad, wienHbf: wien});
+    assert.equal(result.lastUpdated, new Date(now).toISOString());
+    assert.deepEqual(result.badVoeslauToWien.map(train => train.ti), ['09:58', '10:50', '11:53']);
+
+    const [delayedTrain, onTimeTrain, cancelledTrain] = result.badVoeslauToWien;
+    assert.deepEqual(delayedTrain, {
+        ti: '09:58',
+        st: 'Flughafen Wien',
         pr: 'REX 1',
         tr: '2',
-        rt: {dlt: '10:02'},
-        direction: 'Wien Hbf',
-        delay: 120,
+        rt: {dlt: '10:03'},
+        direction: 'Flughafen Wien',
+        delay: 300,
         cancelled: false
     });
-    assert.deepEqual(result.badVoeslauToWien[0][departureTiming], {
-        tripId: 'train-1',
-        plannedAt: Date.parse('2026-08-31T09:58:00+02:00'),
-        expectedAt: Date.parse('2026-08-31T10:00:00+02:00')
+    assert.deepEqual(delayedTrain[departureTiming], {
+        tripId: '09:58',
+        plannedAt: Date.parse(time('09:58')),
+        expectedAt: Date.parse(time('10:03'))
     });
-    const publicRow = JSON.stringify(result.badVoeslauToWien[0]);
-    assert.doesNotMatch(publicRow, /train-1|plannedAt|expectedAt/);
-    assert.equal(result.wienToBadVoeslau.length, 2);
-    assert.equal(result.wienToBadVoeslau[0].pr, 'REX 1');
-    const cancelledTrain = result.wienToBadVoeslau[1];
+    assert.doesNotMatch(JSON.stringify(delayedTrain), /tripId|plannedAt|expectedAt/);
+    assert.equal(onTimeTrain.delay, 0);
     assert.equal(cancelledTrain.cancelled, true);
-    assert.equal(cancelledTrain[departureTiming].plannedAt, Date.parse('2026-08-31T11:08:00+02:00'));
+    assert.equal(cancelledTrain.delay, null);
+    assert.equal(cancelledTrain.rt, undefined);
+    assert.equal(cancelledTrain[departureTiming].plannedAt, Date.parse(time('11:53')));
+    assert.equal(result.wienToBadVoeslau[0].pr, 'S 80');
+    assert.equal(result.wienToBadVoeslau[0].delay, null);
+});
+
+test('journey fetcher rejects a repeated pagination cursor', async () => {
+    const client = {
+        async journeys() {
+            return {journeys: [], laterRef: 'repeated'};
+        }
+    };
+    const fetchDepartures = createDepartureFetcher(client, () => now);
+    await assert.rejects(fetchDepartures(), /repeated a journey pagination cursor/);
 });

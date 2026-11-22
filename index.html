@@ -71,32 +71,62 @@
       }
 
       .departures {
-        margin: 0.5rem 0 0;
-        padding: 0;
-        list-style: none;
+        inline-size: 100%;
+        margin-block-start: 0.5rem;
+        border-collapse: collapse;
+        table-layout: fixed;
       }
 
-      .departures:empty,
       .departure-message:empty,
       #telegramFeedback:empty {
         display: none;
       }
 
-      .departures li {
-        display: grid;
-        grid-template-columns: minmax(4ch, 6.5rem) minmax(0, 1fr) minmax(0, 6.5rem);
-        align-items: center;
-        gap: 0.5rem;
-        min-block-size: 3.35rem;
-        padding-block: 0.15rem;
+      .departures col:nth-child(1) {
+        inline-size: 29%;
+      }
+
+      .departures col:nth-child(2) {
+        inline-size: 26%;
+      }
+
+      .departures col:nth-child(4) {
+        inline-size: 20%;
+      }
+
+      .departures th,
+      .departures td {
+        padding: 0;
         border-bottom: 1px solid var(--divider);
+        text-align: start;
+      }
+
+      .departures th {
+        block-size: 1.5rem;
+        color: var(--muted);
+        font-size: 0.8125rem;
+        font-weight: 550;
+      }
+
+      .departures td {
+        box-sizing: border-box;
+        block-size: 3.6875rem;
+      }
+
+      .departure-time,
+      .arrival-time {
+        font-variant-numeric: tabular-nums;
+        line-height: 1.1;
       }
 
       .departure-time {
-        font-size: 1.625rem;
+        font-size: 1.5rem;
         font-weight: 700;
-        font-variant-numeric: tabular-nums;
-        line-height: 1.15;
+      }
+
+      .arrival-time {
+        font-size: 1.3125rem;
+        font-weight: 600;
       }
 
       .train-line,
@@ -105,10 +135,11 @@
       }
 
       .train-line {
+        font-size: 0.9375rem;
         font-weight: 600;
       }
 
-      .platform {
+      .departures .platform {
         color: var(--muted);
         text-align: end;
       }
@@ -118,14 +149,14 @@
       }
 
       .disruption {
-        color: var(--warning);
-        font-size: 0.875rem;
-        font-weight: 600;
+        font-size: 0.8125rem;
+        line-height: 1.2;
+        font-weight: 650;
       }
 
       .departure-message,
       .last-updated,
-      .platform {
+      td.platform {
         font-size: 0.875rem;
       }
 
@@ -230,12 +261,6 @@
       #telegramFeedback {
         margin: 0.75rem 0 0;
       }
-
-      @media (max-width: 24rem) {
-        .departures li {
-          grid-template-columns: minmax(4ch, 5rem) minmax(0, 1fr) minmax(0, 5.5rem);
-        }
-      }
     </style>
   </head>
   <body>
@@ -245,7 +270,18 @@
         <button type="button" data-direction="wienToBadVoeslau" aria-pressed="false" aria-controls="departures">Wien Hbf → Bad Vöslau</button>
       </div>
       <p id="departureMessage" class="departure-message" role="status">Loading departures…</p>
-      <ul id="departures" class="departures" role="list" aria-label="Departures"></ul>
+      <table id="departures" class="departures" aria-label="Departures" hidden>
+        <colgroup><col /><col /><col /><col /></colgroup>
+        <thead>
+          <tr>
+            <th scope="col" aria-label="Scheduled departure">Sched. dep.</th>
+            <th scope="col">Arrives</th>
+            <th scope="col">Train</th>
+            <th scope="col" class="platform">Platform</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
       <p id="lastUpdated" class="last-updated" hidden>Last updated <time></time></p>
 
       <details>
@@ -275,16 +311,18 @@
     </main>
 
     <template id="trainRow">
-      <li>
-        <span class="departure-time"></span>
-        <span><span class="train-line"></span><span class="disruption" hidden></span></span>
-        <span class="platform"></span>
-      </li>
+      <tr>
+        <td><span class="departure-time"></span><span class="disruption warning-text" hidden></span></td>
+        <td><span class="arrival-time"></span></td>
+        <td><span class="train-line"></span><span class="disruption error-text" hidden>Cancelled</span></td>
+        <td class="platform"></td>
+      </tr>
     </template>
     <script>
       const REFRESH_INTERVAL_MS = 60000;
       const directionButtons = document.querySelectorAll("[data-direction]");
       const departures = document.getElementById("departures");
+      const departureRows = departures.tBodies[0];
       const departureMessage = document.getElementById("departureMessage");
       const lastUpdated = document.getElementById("lastUpdated");
       const updatedTime = lastUpdated.querySelector("time");
@@ -305,19 +343,17 @@
         const row = trainRow.content.cloneNode(true);
         row.querySelector(".departure-time").textContent =
           train.ti && train.ti !== "N/A" ? train.ti : "—";
+        row.querySelector(".arrival-time").textContent = train.cancelled ? "—" : train.arrival || "—";
         row.querySelector(".train-line").textContent = train.pr || "Unknown train";
-        if (train.tr) {
-          row.querySelector(".platform").textContent = "Platform " + train.tr;
-        }
+        row.querySelector(".platform").textContent = train.cancelled ? "—" : train.tr || "—";
 
-        const disruption = row.querySelector(".disruption");
         if (train.cancelled) {
-          disruption.textContent = "Cancelled";
-          disruption.classList.add("error-text");
+          row.querySelector(".disruption.error-text").hidden = false;
         } else if (train.delay > 0) {
-          disruption.textContent = "+" + Math.ceil(train.delay / 60) + " min";
+          const delay = row.querySelector(".disruption.warning-text");
+          delay.textContent = "+" + Math.ceil(train.delay / 60) + " min";
+          delay.hidden = false;
         }
-        disruption.hidden = !disruption.textContent;
         return row;
       };
 
@@ -330,14 +366,15 @@
 
         departureMessage.classList.remove("error-text");
         departureMessage.classList.toggle("warning-text", stale);
-        const emptyMessage = departures.childElementCount ? "" : "No departures.";
+        const emptyMessage = departures.hidden ? "No departures." : "";
         const staleMessage = stale ? "Departures may be out of date." : "";
         departureMessage.textContent = [emptyMessage, staleMessage].filter(Boolean).join(" ");
       };
 
       const renderDepartures = () => {
         const trains = (snapshot?.[direction] ?? []).filter(Boolean);
-        departures.replaceChildren(...trains.map(buildRow));
+        departureRows.replaceChildren(...trains.map(buildRow));
+        departures.hidden = trains.length === 0;
         renderMessage();
       };
 

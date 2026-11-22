@@ -137,3 +137,6 @@ The departure API returns `badVoeslauToWien`, `wienToBadVoeslau`, `lastUpdated`,
 `stations`. Train rows use compact display keys such as `ti`, `st`, `pr`, `tr`, and the
 optional expected departure value `rt.dlt`. The `ti` field holds the scheduled time,
 and `delay` is in seconds or `null` when HAFAS has no delay estimate.
+The `arrival` field holds the destination arrival time in Vienna local time, using
+the expected time when available and the timetable otherwise. It is `null` for
+cancelled services or when neither arrival time is available.

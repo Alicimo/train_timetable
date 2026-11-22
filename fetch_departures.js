@@ -29,7 +29,7 @@ const wienHbf = {id: '8103000', name: 'Wien Hbf'};
 const wienHbfPlatformsOneAndTwo = '8101590';
 const railProducts = {bus: false, subway: false, tram: false, ferry: false, onCall: false};
 
-const departureClock = new Intl.DateTimeFormat('de-AT', {
+const journeyClock = new Intl.DateTimeFormat('de-AT', {
     hour: '2-digit',
     minute: '2-digit',
     timeZone: 'Europe/Vienna'
@@ -45,12 +45,14 @@ function toDeparture(leg, plannedAt, expectedAt) {
     const delay = Number.isFinite(leg.departureDelay) ? leg.departureDelay : null;
     const cancelled = leg.cancelled === true;
     const direction = leg.direction || '';
+    const arrivalAt = Date.parse(leg.arrival ?? leg.plannedArrival);
     const train = {
-        ti: departureClock.format(plannedAt),
+        ti: journeyClock.format(plannedAt),
+        arrival: !cancelled && Number.isFinite(arrivalAt) ? journeyClock.format(arrivalAt) : null,
         st: direction || leg.destination?.name || 'Unknown',
         pr: leg.line.name || 'Unknown',
         tr: leg.departurePlatform || '',
-        rt: delay > 0 && !cancelled ? {dlt: departureClock.format(expectedAt)} : undefined,
+        rt: delay > 0 && !cancelled ? {dlt: journeyClock.format(expectedAt)} : undefined,
         direction,
         delay,
         cancelled

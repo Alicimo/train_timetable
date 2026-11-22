@@ -30,15 +30,23 @@ test('journey fetcher paginates the window and returns direct trains from both V
         destination: wienPlatformsOneAndTwo,
         departure: time('10:03'),
         departureDelay: 300,
+        plannedArrival: time('10:26'),
+        arrival: time('10:28'),
         departurePlatform: '2',
         direction: 'Flughafen Wien'
     });
-    const cancelled = journey('11:53', {departure: null, departureDelay: null, cancelled: true});
+    const cancelled = journey('11:53', {
+        departure: null,
+        departureDelay: null,
+        plannedArrival: time('12:20'),
+        cancelled: true
+    });
     const wienToBad = journey('10:08', {
         origin: wienPlatformsOneAndTwo,
         destination: bad,
         line: {name: 'S 80', mode: 'train'},
-        direction: 'Wr.Neustadt Hbf'
+        direction: 'Wr.Neustadt Hbf',
+        plannedArrival: time('10:36')
     });
 
     const client = {
@@ -96,6 +104,7 @@ test('journey fetcher paginates the window and returns direct trains from both V
     const [delayedTrain, onTimeTrain, cancelledTrain] = result.badVoeslauToWien;
     assert.deepEqual(delayedTrain, {
         ti: '09:58',
+        arrival: '10:28',
         st: 'Flughafen Wien',
         pr: 'REX 1',
         tr: '2',
@@ -111,12 +120,15 @@ test('journey fetcher paginates the window and returns direct trains from both V
     });
     assert.doesNotMatch(JSON.stringify(delayedTrain), /tripId|plannedAt|expectedAt/);
     assert.equal(onTimeTrain.delay, 0);
+    assert.equal(onTimeTrain.arrival, null);
     assert.equal(cancelledTrain.cancelled, true);
     assert.equal(cancelledTrain.delay, null);
+    assert.equal(cancelledTrain.arrival, null);
     assert.equal(cancelledTrain.rt, undefined);
     assert.equal(cancelledTrain[departureTiming].plannedAt, Date.parse(time('11:53')));
     assert.equal(result.wienToBadVoeslau[0].pr, 'S 80');
     assert.equal(result.wienToBadVoeslau[0].delay, null);
+    assert.equal(result.wienToBadVoeslau[0].arrival, '10:36');
 });
 
 test('journey fetcher rejects a repeated pagination cursor', async () => {

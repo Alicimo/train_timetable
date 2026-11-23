@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check fetch_departures.js && node --check fetch_departures.test.js && node --check server.js && node --check server.test.js && node --check telegram_alerts.js && node --check telegram_alerts.test.js && node --check telegram_settings.js && node --check u1_status.js && node --check u1_status.test.js",
+    "check": "node --check delay_history.js && node --check delay_history.test.js && node --check fetch_departures.js && node --check fetch_departures.test.js && node --check server.js && node --check server.test.js && node --check telegram_alerts.js && node --check telegram_alerts.test.js && node --check telegram_settings.js && node --check u1_status.js && node --check u1_status.test.js",
     "test": "node --test"
   },
   "keywords": [],

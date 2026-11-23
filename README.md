@@ -100,6 +100,28 @@ containing `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. The service imports thes
 values only when the settings file is absent. Once saved, dashboard settings take
 precedence, including when alerts are disabled.
 
+## Train delay history
+
+The backend checks the shared ÖBB departure cache about once a minute, even with
+Telegram disabled. It keeps the first fresh observation of each run within two
+minutes before its scheduled departure. Stale snapshots are skipped. A longer
+cache TTL, downtime, or missing feed data can leave gaps in the history.
+
+The service stores one JSON object per line under
+`STATE_DIRECTORY/train-delay-history/YYYY-MM-DD.jsonl`, using the scheduled
+departure date in Europe/Vienna. Local runs default to `.train-updates-state/`.
+Files are retained across restarts and are not automatically deleted. Each row
+contains `observedAt` and `scheduledDeparture` as ISO timestamps, route
+`direction`, `tripId`, `trainNumber`, `serviceName`, `delaySeconds`, and
+`cancelled`. Zero means ÖBB reported zero delay. A null delay means no estimate.
+
+To estimate the chance of a delay, group runs by train number and direction,
+using the Vienna-local scheduled time to distinguish timetable slots if needed.
+Among observed, non-cancelled runs with a numeric estimate, divide the count at
+or above the chosen delay threshold by the total. Count cancellations separately.
+This measures ÖBB's near-departure estimate. Unknown and missed runs do not
+contribute to the denominator.
+
 ## Nix
 
 Run or build the packaged service directly:

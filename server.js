@@ -5,7 +5,8 @@ const http = require('http');
 const path = require('path');
 
 const {fetchDepartures} = require('./fetch_departures');
-const {startTelegramAlerts} = require('./telegram_alerts');
+const {startPolling, startTelegramAlerts} = require('./telegram_alerts');
+const {createDelayHistoryPoll} = require('./delay_history');
 const {createTelegramSettings, TelegramSettingsError} = require('./telegram_settings');
 const {fetchU1Status} = require('./u1_status');
 
@@ -132,7 +133,8 @@ function createServer({
     indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'),
     logger = console,
     telegramSendMessage,
-    telegramSettings
+    telegramSettings,
+    historyDirectory
 } = {}) {
     const cache = createDepartureCache(loadDepartures, cacheTtlMs, now, refreshTimeoutMs);
     const u1Cache = createRefreshCache(
@@ -234,8 +236,20 @@ function createServer({
         sendJson(res, 404, {error: 'Not found'});
     });
 
-    server.on('listening', () => applyTelegramSender(telegramSettings?.sender() ?? telegramSendMessage));
-    server.once('close', () => stopTelegramAlerts?.());
+    let stopDelayHistory;
+    server.on('listening', () => {
+        if (historyDirectory) {
+            stopDelayHistory = startPolling(createDelayHistoryPoll({
+                directory: historyDirectory,
+                getDepartures: () => cache.get()
+            }), (error) => logger.error('Could not record train delay history:', error.message));
+        }
+        applyTelegramSender(telegramSettings?.sender() ?? telegramSendMessage);
+    });
+    server.once('close', () => {
+        stopDelayHistory?.();
+        stopTelegramAlerts?.();
+    });
 
     return server;
 }
@@ -258,20 +272,20 @@ async function main() {
     const port = readPositiveInteger('PORT', DEFAULT_PORT);
     const cacheTtlSeconds = readPositiveInteger('CACHE_TTL_SECONDS', DEFAULT_CACHE_TTL_SECONDS);
     const hafasTimeoutSeconds = readPositiveInteger('HAFAS_TIMEOUT_SECONDS', DEFAULT_HAFAS_TIMEOUT_SECONDS);
-    const telegramSettings = await createTelegramSettings({
-        directory: process.env.STATE_DIRECTORY || path.resolve('.train-updates-state')
-    });
+    const stateDirectory = process.env.STATE_DIRECTORY || path.resolve('.train-updates-state');
+    const telegramSettings = await createTelegramSettings({directory: stateDirectory});
     const server = createServer({
         cacheTtlMs: cacheTtlSeconds * 1000,
         refreshTimeoutMs: hafasTimeoutSeconds * 1000,
-        telegramSettings
+        telegramSettings,
+        historyDirectory: path.join(stateDirectory, 'train-delay-history')
     });
 
     server.listen(port, host, () => {
         console.log(`Train updates listening on http://${host}:${port}`);
     });
 
-    const shutdown = () => server.close(() => process.exit(0));
+    const shutdown = () => server.close();
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
 }

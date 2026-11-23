@@ -138,9 +138,9 @@ function startPolling(poll, onError) {
     async function tick() {
         try {
             await poll(controller.signal);
-        } catch {
+        } catch (error) {
             if (!controller.signal.aborted) {
-                onError();
+                onError(error);
             }
         }
 
@@ -186,4 +186,4 @@ function createTelegramSender({botToken, chatId}, request = fetch) {
     };
 }
 
-module.exports = {createTelegramPoll, createU1TelegramPoll, startTelegramAlerts, createTelegramSender, directions};
+module.exports = {createTelegramPoll, createU1TelegramPoll, startPolling, startTelegramAlerts, createTelegramSender, directions};

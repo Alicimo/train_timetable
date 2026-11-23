@@ -28,6 +28,7 @@ test('journey fetcher paginates the window and returns direct trains from both V
     const calls = [];
     const delayed = journey('09:58', {
         destination: wienPlatformsOneAndTwo,
+        line: {name: 'REX 1', mode: 'train', fahrtNr: '2307'},
         departure: time('10:03'),
         departureDelay: 300,
         plannedArrival: time('10:26'),
@@ -115,10 +116,11 @@ test('journey fetcher paginates the window and returns direct trains from both V
     });
     assert.deepEqual(delayedTrain[departureTiming], {
         tripId: '09:58',
+        trainNumber: '2307',
         plannedAt: Date.parse(time('09:58')),
         expectedAt: Date.parse(time('10:03'))
     });
-    assert.doesNotMatch(JSON.stringify(delayedTrain), /tripId|plannedAt|expectedAt/);
+    assert.doesNotMatch(JSON.stringify(delayedTrain), /tripId|trainNumber|plannedAt|expectedAt/);
     assert.equal(onTimeTrain.delay, 0);
     assert.equal(onTimeTrain.arrival, null);
     assert.equal(cancelledTrain.cancelled, true);

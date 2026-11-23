@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const {tmpdir} = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const {setTimeout: delay} = require('node:timers/promises');
 
 const {departureTiming} = require('./fetch_departures');
 const {createDepartureCache, createServer} = require('./server');
@@ -108,6 +109,47 @@ test('server exposes the page, health check, and departure API', async (t) => {
 
     const missingResponse = await fetch(`${baseUrl}/missing`);
     assert.equal(missingResponse.status, 404);
+});
+
+test('the server records a departure at startup without Telegram or dashboard traffic', {timeout: 2000}, async (t) => {
+    const historyDirectory = await fs.mkdtemp(path.join(tmpdir(), 'train-delay-server-'));
+    t.after(() => fs.rm(historyDirectory, {recursive: true, force: true}));
+    let loads = 0;
+    const publicTrain = {pr: 'REX 1', delay: 60, cancelled: false};
+    const plannedAt = Date.parse(sampleDepartures.lastUpdated) + 60_000;
+    const baseUrl = await startTestServer(t, {
+        historyDirectory,
+        async loadDepartures() {
+            loads += 1;
+            return {
+                ...sampleDepartures,
+                badVoeslauToWien: [{
+                    ...publicTrain,
+                    [departureTiming]: {tripId: 'trip', trainNumber: '2307', plannedAt}
+                }]
+            };
+        }
+    });
+
+    const file = path.join(historyDirectory, '2026-08-31.jsonl');
+    const deadline = AbortSignal.timeout(1000);
+    let contents = '';
+    while (!contents.endsWith('\n')) {
+        contents = await fs.readFile(file, 'utf8').catch((error) => {
+            if (error.code !== 'ENOENT') {
+                throw error;
+            }
+            return '';
+        });
+        if (!contents.endsWith('\n')) {
+            await delay(10, undefined, {signal: deadline});
+        }
+    }
+    assert.equal(JSON.parse(contents).trainNumber, '2307');
+
+    const response = await fetch(`${baseUrl}/api/departures`);
+    assert.deepEqual(await response.json(), {...sampleDepartures, badVoeslauToWien: [publicTrain]});
+    assert.equal(loads, 1);
 });
 
 test('U1 endpoint can serve fresh and stale snapshots independently of departures', async (t) => {

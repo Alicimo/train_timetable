@@ -59,7 +59,7 @@ function toDeparture(leg, plannedAt, expectedAt) {
     };
 
     Object.defineProperty(train, departureTiming, {
-        value: {tripId: leg.tripId, plannedAt, expectedAt}
+        value: {tripId: leg.tripId, trainNumber: leg.line.fahrtNr ?? null, plannedAt, expectedAt}
     });
     return train;
 }

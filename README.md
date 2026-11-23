@@ -82,6 +82,14 @@ departure data and unknown delay values do not trigger delay alerts.
 The service remembers successful sends in memory, so restarting the service or
 changing the destination can repeat a recent alert.
 
+The dashboard also shows U1 service notices for the Hauptbahnhof–Stephansplatz
+commute. The notices describe the U1 line and may omit the affected stops.
+It displays both detailed and short notices, with identical short notices grouped.
+The bot sends detailed U1 notices once per notice ID during an eligible window for
+either commute direction. It retries failed deliveries and skips stale data. U1
+checks use an independent cache and continue if the ÖBB feed is unavailable.
+Service notice data comes from [Wiener Linien Open Data](https://www.wienerlinien.at/open-data).
+
 Telegram settings survive restarts. The NixOS module provides a private systemd
 state directory. Local runs store the settings under `.train-updates-state/` in
 the working directory.

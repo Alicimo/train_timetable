@@ -97,8 +97,41 @@ function createTelegramPoll({getDepartures, sendMessage, now, logger, allowsAler
     };
 }
 
-function startTelegramAlerts(options) {
-    const poll = createTelegramPoll(options);
+function createU1TelegramPoll({getU1Status, sendMessage, now, logger, allowsAlerts = () => true}) {
+    const sent = new Set();
+
+    return async function poll(signal) {
+        if (signal?.aborted || !allowsAlerts(now())) {
+            return;
+        }
+        const {data, stale} = await getU1Status();
+        if (stale) {
+            return;
+        }
+
+        for (const {id, detailed, title, description, endsAt} of data.notices) {
+            if (signal?.aborted || !allowsAlerts(now())) {
+                return;
+            }
+            if (!detailed || sent.has(id) || (endsAt && Date.parse(endsAt) <= now())) {
+                continue;
+            }
+
+            const body = description && description !== title ? `\n${description}` : '';
+            const text = `U1 service notice · ${title}${body}`;
+            try {
+                await sendMessage(text, signal);
+                sent.add(id);
+            } catch {
+                if (!signal?.aborted) {
+                    logger.error('Telegram U1 alert failed');
+                }
+            }
+        }
+    };
+}
+
+function startPolling(poll, onError) {
     const controller = new AbortController();
     let timer;
 
@@ -106,7 +139,9 @@ function startTelegramAlerts(options) {
         try {
             await poll(controller.signal);
         } catch {
-            options.logger.error('Could not check departures for Telegram alerts');
+            if (!controller.signal.aborted) {
+                onError();
+            }
         }
 
         if (!controller.signal.aborted) {
@@ -122,6 +157,18 @@ function startTelegramAlerts(options) {
     };
 }
 
+function startTelegramAlerts(options) {
+    const stopTrains = startPolling(createTelegramPoll(options),
+        () => options.logger.error('Could not check departures for Telegram alerts'));
+    const stopU1 = options.getU1Status && startPolling(createU1TelegramPoll(options),
+        () => options.logger.error('Could not check U1 status for Telegram alerts'));
+
+    return () => {
+        stopTrains();
+        stopU1?.();
+    };
+}
+
 function createTelegramSender({botToken, chatId}, request = fetch) {
     return async function sendMessage(text, signal) {
         const timeout = AbortSignal.timeout(SEND_TIMEOUT_MS);
@@ -134,9 +181,9 @@ function createTelegramSender({botToken, chatId}, request = fetch) {
         });
         const result = await response.json();
         if (!response.ok || result?.ok !== true) {
-            throw new Error('Telegram rejected the train alert');
+            throw new Error('Telegram rejected the message');
         }
     };
 }
 
-module.exports = {createTelegramPoll, startTelegramAlerts, createTelegramSender, directions};
+module.exports = {createTelegramPoll, createU1TelegramPoll, startTelegramAlerts, createTelegramSender, directions};

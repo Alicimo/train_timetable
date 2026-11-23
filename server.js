@@ -7,11 +7,14 @@ const path = require('path');
 const {fetchDepartures} = require('./fetch_departures');
 const {startTelegramAlerts} = require('./telegram_alerts');
 const {createTelegramSettings, TelegramSettingsError} = require('./telegram_settings');
+const {fetchU1Status} = require('./u1_status');
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3000;
 const DEFAULT_CACHE_TTL_SECONDS = 60;
 const DEFAULT_HAFAS_TIMEOUT_SECONDS = 15;
+const U1_CACHE_TTL_MS = 60_000;
+const U1_TIMEOUT_MS = 5_000;
 const SETTINGS_BODY_LIMIT = 4096;
 
 function createDepartureCache(
@@ -20,6 +23,10 @@ function createDepartureCache(
     now = Date.now,
     refreshTimeoutMs = DEFAULT_HAFAS_TIMEOUT_SECONDS * 1000
 ) {
+    return createRefreshCache(loadDepartures, ttlMs, now, refreshTimeoutMs, 'HAFAS');
+}
+
+function createRefreshCache(load, ttlMs, now, refreshTimeoutMs, source) {
     let cachedData = null;
     let expiresAt = 0;
     let refresh = null;
@@ -36,12 +43,12 @@ function createDepartureCache(
                 const deadline = new Promise((_, reject) => {
                     timeout = setTimeout(() => {
                         controller.abort();
-                        reject(new Error('HAFAS refresh timed out'));
+                        reject(new Error(`${source} refresh timed out`));
                     }, refreshTimeoutMs);
                 });
 
                 refresh = Promise.race([
-                    Promise.resolve().then(() => loadDepartures({signal: controller.signal})),
+                    Promise.resolve().then(() => load({signal: controller.signal})),
                     deadline
                 ])
                     .then((data) => {
@@ -117,8 +124,10 @@ async function readSettingsBody(req) {
 
 function createServer({
     loadDepartures = fetchDepartures,
+    loadU1Status = fetchU1Status,
     cacheTtlMs = DEFAULT_CACHE_TTL_SECONDS * 1000,
     refreshTimeoutMs = DEFAULT_HAFAS_TIMEOUT_SECONDS * 1000,
+    u1TimeoutMs = U1_TIMEOUT_MS,
     now = Date.now,
     indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'),
     logger = console,
@@ -126,6 +135,9 @@ function createServer({
     telegramSettings
 } = {}) {
     const cache = createDepartureCache(loadDepartures, cacheTtlMs, now, refreshTimeoutMs);
+    const u1Cache = createRefreshCache(
+        ({signal}) => loadU1Status({signal, now}), U1_CACHE_TTL_MS, now, u1TimeoutMs, 'Wiener Linien'
+    );
     const appleTouchIcon = fs.readFileSync(path.join(__dirname, 'apple-touch-icon.png'));
 
     let stopTelegramAlerts;
@@ -133,6 +145,7 @@ function createServer({
         stopTelegramAlerts?.();
         stopTelegramAlerts = sendMessage && startTelegramAlerts({
             getDepartures: () => cache.get(),
+            getU1Status: () => u1Cache.get(),
             sendMessage,
             allowsAlerts: telegramSettings?.allowsAlerts,
             now,
@@ -203,6 +216,17 @@ function createServer({
             } catch (error) {
                 logger.error('Failed to refresh departures:', error);
                 sendJson(res, 502, {error: 'Unable to fetch departures'});
+            }
+            return;
+        }
+
+        if (req.method === 'GET' && requestUrl.pathname === '/api/u1-status') {
+            try {
+                const {data, stale} = await u1Cache.get();
+                sendJson(res, 200, {...data, stale});
+            } catch (error) {
+                logger.error('Failed to refresh U1 status:', error);
+                sendJson(res, 502, {error: 'Unable to fetch U1 status'});
             }
             return;
         }

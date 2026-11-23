@@ -72,6 +72,38 @@
         color: #fff;
       }
 
+      .u1-card {
+        margin-block-start: 0.75rem;
+        padding: 0.625rem 0.75rem;
+        border: 1px solid var(--divider);
+        border-radius: 0.5rem;
+        overflow-wrap: anywhere;
+      }
+
+      .u1-card h2 {
+        margin: 0;
+        font-size: 0.9375rem;
+      }
+
+      .u1-card p,
+      .u1-card ul {
+        margin-block: 0.25rem;
+        font-size: 0.875rem;
+      }
+
+      .u1-card ul {
+        padding-inline-start: 1.25rem;
+      }
+
+      .u1-card li + li {
+        margin-block-start: 0.4rem;
+      }
+
+      .u1-card a {
+        color: var(--accent);
+        font-size: 0.8125rem;
+      }
+
       .departures {
         inline-size: 100%;
         margin-block-start: 0.5rem;
@@ -326,6 +358,12 @@
         <button type="button" data-direction="badVoeslauToWien" aria-pressed="false" aria-controls="departures">Bad Vöslau → Wien Hbf</button>
         <button type="button" data-direction="wienToBadVoeslau" aria-pressed="false" aria-controls="departures">Wien Hbf → Bad Vöslau</button>
       </div>
+      <section class="u1-card" aria-labelledby="u1Heading">
+        <h2 id="u1Heading">U1 · Hauptbahnhof ↔ Stephansplatz</h2>
+        <p id="u1Message" role="status">Checking U1 status…</p>
+        <ul id="u1Notices" hidden></ul>
+        <a href="https://www.wienerlinien.at/betriebsinfo">Wiener Linien service information</a>
+      </section>
       <p id="departureMessage" class="departure-message" role="status">Loading departures…</p>
       <table id="departures" class="departures" aria-label="Departures" hidden>
         <colgroup><col /><col /><col /><col /></colgroup>
@@ -518,6 +556,56 @@
         setTimeout(loadDepartures, REFRESH_INTERVAL_MS);
       };
 
+      const u1Message = document.getElementById("u1Message");
+      const u1Notices = document.getElementById("u1Notices");
+      let u1Snapshot = null;
+
+      const renderU1Status = (snapshot, stale) => {
+        const notices = snapshot?.notices ?? [];
+        const message = snapshot
+          ? stale
+            ? "Status may be out of date"
+            : notices.length ? "U1 service notice" : "No disruptions reported"
+          : "Status unavailable";
+        if (u1Message.textContent !== message) {
+          u1Message.textContent = message;
+        }
+        u1Message.className = stale || notices.length ? "warning-text" : "";
+
+        const shortNotices = new Set();
+        const items = [];
+        for (const {detailed, title, description} of notices) {
+          const text = description && description !== title ? `${title} · ${description}` : title;
+          if (!detailed) {
+            const wording = text.replace(/\s+/g, " ");
+            if (shortNotices.has(wording)) {
+              continue;
+            }
+            shortNotices.add(wording);
+          }
+          const item = document.createElement("li");
+          item.textContent = text;
+          items.push(item);
+        }
+        u1Notices.replaceChildren(...items);
+        u1Notices.hidden = items.length === 0;
+      };
+
+      const loadU1Status = async () => {
+        try {
+          const response = await fetch("/api/u1-status");
+          if (!response.ok) {
+            throw new Error("Couldn’t load U1 status");
+          }
+          u1Snapshot = await response.json();
+          renderU1Status(u1Snapshot, u1Snapshot.stale);
+        } catch {
+          renderU1Status(u1Snapshot, Boolean(u1Snapshot));
+        }
+
+        setTimeout(loadU1Status, REFRESH_INTERVAL_MS);
+      };
+
       const telegramSettingsPath = "/api/telegram-settings";
       const telegramForm = document.getElementById("telegramSettings");
       const telegramFields = document.getElementById("telegramFields");
@@ -660,6 +748,7 @@
 
       loadTelegramSettings();
       loadDepartures();
+      loadU1Status();
     </script>
   </body>
 </html>

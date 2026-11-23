@@ -20,6 +20,7 @@ const sampleDepartures = {
         wienHbf: {name: 'Wien Hbf', id: '2'}
     }
 };
+const clearU1 = {checkedAt: '2026-11-23T05:21:56.000Z', notices: []};
 
 test('departure cache reuses fresh data and refreshes expired data', async () => {
     let currentTime = 0;
@@ -79,7 +80,7 @@ test('departure cache serves stale data when a refresh fails', async () => {
 });
 
 async function startTestServer(t, options) {
-    const server = createServer(options);
+    const server = createServer({loadU1Status: async () => clearU1, ...options});
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     t.after(() => server.close());
@@ -107,6 +108,69 @@ test('server exposes the page, health check, and departure API', async (t) => {
 
     const missingResponse = await fetch(`${baseUrl}/missing`);
     assert.equal(missingResponse.status, 404);
+});
+
+test('U1 endpoint can serve fresh and stale snapshots independently of departures', async (t) => {
+    let currentTime = 0;
+    let attempts = 0;
+    let aborted = false;
+    const baseUrl = await startTestServer(t, {
+        now: () => currentTime,
+        u1TimeoutMs: 10,
+        loadDepartures: async () => { throw new Error('ÖBB offline'); },
+        loadU1Status({signal}) {
+            if (++attempts === 1) {
+                return clearU1;
+            }
+            return new Promise(() => {
+                signal.addEventListener('abort', () => { aborted = true; });
+            });
+        },
+        logger: {error() {}}
+    });
+    const getU1 = async () => (await fetch(`${baseUrl}/api/u1-status`)).json();
+
+    assert.equal((await fetch(`${baseUrl}/api/departures`)).status, 502);
+    assert.deepEqual(await getU1(), {...clearU1, stale: false});
+    assert.deepEqual(await getU1(), {...clearU1, stale: false});
+    currentTime = 60_000;
+    assert.deepEqual(await getU1(), {...clearU1, stale: true});
+    assert.equal(aborted, true);
+    assert.equal(attempts, 2);
+});
+
+test('U1 Telegram alerts and the endpoint share a refresh even if ÖBB fails', {timeout: 2000}, async (t) => {
+    let loads = 0;
+    let finishLoad;
+    let finishAlert;
+    const pendingLoad = new Promise((resolve) => { finishLoad = resolve; });
+    const alert = new Promise((resolve) => { finishAlert = resolve; });
+    const baseUrl = await startTestServer(t, {
+        loadDepartures: async () => { throw new Error('ÖBB offline'); },
+        loadU1Status() {
+            loads += 1;
+            return pendingLoad;
+        },
+        telegramSendMessage: finishAlert,
+        logger: {error() {}}
+    });
+    const response = fetch(`${baseUrl}/api/u1-status`);
+    finishLoad({...clearU1, notices: [{id: 'closure', detailed: true, title: 'Kein Betrieb'}]});
+    assert.match(await alert, /U1 service notice · Kein Betrieb/);
+    assert.equal((await response).status, 200);
+    assert.equal(loads, 1);
+});
+
+test('initial U1 failure leaves the departure board available', async (t) => {
+    const baseUrl = await startTestServer(t, {
+        loadDepartures: async () => sampleDepartures,
+        loadU1Status: async () => { throw new Error('Wiener Linien offline'); },
+        logger: {error() {}}
+    });
+    const response = await fetch(`${baseUrl}/api/u1-status`);
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {error: 'Unable to fetch U1 status'});
+    assert.equal((await fetch(`${baseUrl}/api/departures`)).status, 200);
 });
 
 test('dashboard links to a 180×180 iOS Home Screen icon', async (t) => {
@@ -200,6 +264,7 @@ test('Telegram startup check and the departure API share an in-flight refresh', 
     });
     const server = createServer({
         now: () => now,
+        loadU1Status: async () => clearU1,
         loadDepartures() {
             loads += 1;
             return pendingLoad;
@@ -472,11 +537,16 @@ test('saved notification windows filter alerts by direction and Vienna local tim
             [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
         };
         let polled = false;
+        let u1Polled = false;
         const restarted = await start({
             now: () => now,
             async loadDepartures() {
                 polled = true;
                 return {...sampleDepartures, badVoeslauToWien: [train], wienToBadVoeslau: [train]};
+            },
+            async loadU1Status() {
+                u1Polled = true;
+                return {...clearU1, notices: [{id: 'delay', detailed: true, title: 'Verspätungen'}]};
             }
         });
         const status = await restarted.status();
@@ -484,6 +554,10 @@ test('saved notification windows filter alerts by direction and Vienna local tim
             days: [6], windows: schedule.windows.filter((window) => window.direction)
         });
         assert.equal(polled, expectedRoutes.length > 0, timestamp);
-        assert.deepEqual(messages.map(({text}) => text.split(' · ')[0]), expectedRoutes, timestamp);
+        assert.equal(u1Polled, expectedRoutes.length > 0, timestamp);
+        const routes = messages.map(({text}) => text.split(' · ')[0]);
+        assert.deepEqual(routes.filter((route) => route !== 'U1 service notice'), expectedRoutes, timestamp);
+        assert.equal(routes.filter((route) => route === 'U1 service notice').length,
+            Number(expectedRoutes.length > 0), timestamp);
     }
 });

@@ -23,6 +23,8 @@ buildNpmPackage {
       ./telegram_alerts.js
       ./telegram_alerts.test.js
       ./telegram_settings.js
+      ./u1_status.js
+      ./u1_status.test.js
     ];
   };
 
@@ -42,7 +44,7 @@ buildNpmPackage {
     runHook preInstall
 
     mkdir -p "$out/bin" "$out/lib/train-updates"
-    cp apple-touch-icon.png fetch_departures.js index.html package.json server.js telegram_alerts.js telegram_settings.js "$out/lib/train-updates/"
+    cp apple-touch-icon.png fetch_departures.js index.html package.json server.js telegram_alerts.js telegram_settings.js u1_status.js "$out/lib/train-updates/"
     cp -r node_modules "$out/lib/train-updates/"
     makeWrapper ${lib.getExe nodejs} "$out/bin/train-updates" \
       --add-flags "$out/lib/train-updates/server.js"

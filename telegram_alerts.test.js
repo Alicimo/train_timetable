@@ -2,9 +2,57 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {departureTiming} = require('./fetch_departures');
-const {createTelegramPoll, createTelegramSender} = require('./telegram_alerts');
+const {createTelegramPoll, createU1TelegramPoll, createTelegramSender} = require('./telegram_alerts');
 
 const now = Date.parse('2026-08-31T08:00:00Z');
+
+test('U1 poll retries detailed alerts within the schedule and skips stale or short notices', async () => {
+    const attempts = [];
+    const errors = [];
+    let allowed = false;
+    let loads = 0;
+    const snapshot = {
+        stale: true,
+        data: {notices: [
+            {id: 'short', detailed: false, title: 'Kein Betrieb'},
+            {id: 'expired', detailed: true, title: 'Expired', endsAt: new Date(now).toISOString()},
+            {id: 'delay', detailed: true, title: 'U1: Verspätungen', description: 'Unregelmäßige Intervalle.'}
+        ]}
+    };
+    const poll = createU1TelegramPoll({
+        getU1Status: async () => {
+            loads += 1;
+            return snapshot;
+        },
+        async sendMessage(message) {
+            attempts.push(message);
+            if (attempts.length === 1) {
+                throw new Error('Telegram unavailable');
+            }
+        },
+        now: () => now,
+        logger: {error: (error) => errors.push(error)},
+        allowsAlerts(timestamp, direction) {
+            assert.equal(timestamp, now);
+            assert.equal(direction, undefined);
+            return allowed;
+        }
+    });
+
+    await poll();
+    assert.equal(loads, 0);
+    allowed = true;
+    await poll();
+    assert.deepEqual(attempts, []);
+
+    snapshot.stale = false;
+    await poll();
+    await poll();
+    await poll();
+    const message = 'U1 service notice · U1: Verspätungen\nUnregelmäßige Intervalle.';
+    assert.deepEqual(attempts, [message, message]);
+    assert.deepEqual(errors, ['Telegram U1 alert failed']);
+});
 
 function departure(id, minutesAway, delay = 0, cancelled = false) {
     const plannedAt = now + minutesAway * 60_000;

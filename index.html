@@ -420,9 +420,13 @@
               Choose a direction for each window. Windows use Vienna time and can run past midnight from a selected day.
               Clear all days to pause scheduled alerts.</p>
             <div id="notificationWindows"></div>
+            <div class="field">
+              <label for="minimumDelayMinutes">Minimum train delay (minutes)</label>
+              <input id="minimumDelayMinutes" type="number" min="5" step="5" required />
+            </div>
             <div class="form-actions">
               <button id="addNotificationWindow" type="button">Add time window</button>
-              <button type="submit">Save schedule</button>
+              <button type="submit">Save notification preferences</button>
             </div>
           </fieldset>
           <p id="scheduleFeedback" role="status"></p>
@@ -618,6 +622,7 @@
       const scheduleForm = document.getElementById("notificationSchedule");
       const scheduleFields = document.getElementById("scheduleFields");
       const scheduleFeedback = document.getElementById("scheduleFeedback");
+      const minimumDelayInput = document.getElementById("minimumDelayMinutes");
       const notificationDays = scheduleForm.querySelectorAll('[name="notificationDay"]');
       const notificationWindows = document.getElementById("notificationWindows");
       const windowTemplate = document.getElementById("notificationWindow");
@@ -667,6 +672,7 @@
           const settings = await response.json();
           showTelegramSettings(settings);
           showSchedule(settings.schedule);
+          minimumDelayInput.value = settings.minimumDelayMinutes;
           telegramFields.disabled = false;
           scheduleFields.disabled = false;
         } catch {
@@ -731,16 +737,17 @@
           end: row.querySelector('[name="end"]').value,
           direction: row.querySelector('[name="windowDirection"]').value,
         }));
+        const minimumDelayMinutes = minimumDelayInput.valueAsNumber;
         scheduleFields.disabled = true;
         scheduleFeedback.className = "";
-        scheduleFeedback.textContent = "Saving schedule…";
+        scheduleFeedback.textContent = "Saving notification preferences…";
         try {
-          const settings = await saveTelegramSettings({ schedule: { days, windows } });
+          const settings = await saveTelegramSettings({ schedule: { days, windows }, minimumDelayMinutes });
           scheduleFeedback.className = settings.error ? "error-text" : "success-text";
-          scheduleFeedback.textContent = settings.error ?? "Schedule saved.";
+          scheduleFeedback.textContent = settings.error ?? "Notification preferences saved.";
         } catch {
           scheduleFeedback.className = "error-text";
-          scheduleFeedback.textContent = "Unable to save the schedule.";
+          scheduleFeedback.textContent = "Unable to save notification preferences.";
         } finally {
           scheduleFields.disabled = false;
         }

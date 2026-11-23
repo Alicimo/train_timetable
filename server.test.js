@@ -11,6 +11,7 @@ const {createDepartureCache, createServer} = require('./server');
 const {createTelegramSettings} = require('./telegram_settings');
 
 const defaultSchedule = {days: [0, 1, 2, 3, 4, 5, 6], windows: []};
+const defaultPreferences = {schedule: defaultSchedule, minimumDelayMinutes: 10};
 
 const sampleDepartures = {
     badVoeslauToWien: [],
@@ -322,16 +323,16 @@ test('Telegram startup check and the departure API share an in-flight refresh', 
     await requestSeen;
     assert.equal(loads, 1);
 
-    const publicTrain = {pr: 'REX 1', delay: 360, cancelled: false};
+    const publicTrain = {pr: 'REX 1', delay: 600, cancelled: false};
     finishLoad({
         ...sampleDepartures,
         badVoeslauToWien: [{
             ...publicTrain,
-            [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
+            [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 600_000}
         }]
     });
 
-    assert.match(await alert, /delayed 6 min/);
+    assert.match(await alert, /delayed 10 min/);
     const response = await responsePending;
     assert.deepEqual((await response.json()).badVoeslauToWien, [publicTrain]);
     assert.equal(loads, 1);
@@ -378,20 +379,20 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
             ...sampleDepartures,
             badVoeslauToWien: [{
                 pr: 'REX 1',
-                delay: 360,
+                delay: 600,
                 cancelled: false,
-                [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
+                [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 600_000}
             }]
         })
     });
-    assert.deepEqual(await api.status(), {enabled: false, chatId: null, hasToken: false, schedule: defaultSchedule});
+    assert.deepEqual(await api.status(), {enabled: false, chatId: null, hasToken: false, ...defaultPreferences});
 
-    const configured = {enabled: true, chatId: '-123', hasToken: true, schedule: defaultSchedule};
+    const configured = {enabled: true, chatId: '-123', hasToken: true, ...defaultPreferences};
     const setup = await api.save({enabled: true, chatId: '-123', botToken: '1:mock-token'});
     assert.equal(setup.status, 200);
     assert.deepEqual(await setup.json(), configured);
     assert.equal(messages[0].text, 'Train updates · Telegram alerts test');
-    assert.match(messages[1].text, /delayed 6 min/);
+    assert.match(messages[1].text, /delayed 10 min/);
     assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
     assert.deepEqual(await (await start()).status(), configured);
 
@@ -407,7 +408,7 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
 
     const beforeDisable = messages.length;
     const disabled = await api.save({enabled: false});
-    assert.deepEqual(await disabled.json(), {enabled: false, chatId: '-456', hasToken: true, schedule: defaultSchedule});
+    assert.deepEqual(await disabled.json(), {enabled: false, chatId: '-456', hasToken: true, ...defaultPreferences});
     assert.equal(messages.length, beforeDisable + 1);
     assert.deepEqual(messages.at(-1), {
         url: 'https://api.telegram.org/bot2:new-token/sendMessage',
@@ -417,7 +418,7 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
     assert.equal((await api.save({enabled: false})).status, 200);
     assert.equal(messages.length, beforeDisable + 1);
     const restarted = await start();
-    assert.deepEqual(await restarted.status(), {enabled: false, chatId: '-456', hasToken: true, schedule: defaultSchedule});
+    assert.deepEqual(await restarted.status(), {enabled: false, chatId: '-456', hasToken: true, ...defaultPreferences});
     const reenabled = await restarted.save({enabled: true, chatId: '-456'});
     assert.equal(reenabled.status, 200);
     assert.match(messages.at(-1).url, /bot2:new-token\/sendMessage$/);
@@ -431,7 +432,7 @@ test('alerts stay disabled when Telegram rejects the disable confirmation', asyn
     const api = await start();
     const response = await api.save({enabled: false});
     assert.equal(response.status, 200);
-    const disabled = {enabled: false, chatId: '123', hasToken: true, schedule: defaultSchedule};
+    const disabled = {enabled: false, chatId: '123', hasToken: true, ...defaultPreferences};
     assert.deepEqual(await response.json(), {
         ...disabled,
         warning: 'Alerts are disabled, but Telegram could not deliver the confirmation.'
@@ -446,12 +447,12 @@ test('persisted settings beat the deployment seed, including after disabling', a
         TELEGRAM_CHAT_ID: '123'
     });
     const api = await start();
-    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule});
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, ...defaultPreferences});
     assert.equal(messages.length, 0);
 
     assert.equal((await api.save({enabled: true, chatId: '456'})).status, 200);
     assert.equal((await api.save({enabled: false})).status, 200);
-    assert.deepEqual(await (await start()).status(), {enabled: false, chatId: '456', hasToken: true, schedule: defaultSchedule});
+    assert.deepEqual(await (await start()).status(), {enabled: false, chatId: '456', hasToken: true, ...defaultPreferences});
 });
 
 test('failed test sends and failed writes preserve active settings', async (t) => {
@@ -465,13 +466,13 @@ test('failed test sends and failed writes preserve active settings', async (t) =
     assert.equal(rejected.status, 502);
     assert.doesNotMatch(await rejected.text(), /2:rejected/);
     assert.equal(await fs.readFile(file, 'utf8'), original);
-    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule});
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, ...defaultPreferences});
 
     await fs.rename(file, `${file}.backup`);
     await fs.mkdir(file);
     const failedWrite = await api.save({enabled: true, chatId: '-456'});
     assert.equal(failedWrite.status, 500);
-    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule});
+    assert.deepEqual(await api.status(), {enabled: true, chatId: '123', hasToken: true, ...defaultPreferences});
 });
 
 test('invalid seed and corrupt state leave the departure service usable and allow repair', async (t) => {
@@ -485,7 +486,7 @@ test('invalid seed and corrupt state leave the departure service usable and allo
     assert.equal(status.enabled, false);
     assert.match(status.issue, /Could not read saved Telegram settings/);
     assert.equal((await restarted.save({enabled: true, chatId: '456', botToken: '1:fixed'})).status, 200);
-    assert.deepEqual(await restarted.status(), {enabled: true, chatId: '456', hasToken: true, schedule: defaultSchedule});
+    assert.deepEqual(await restarted.status(), {enabled: true, chatId: '456', hasToken: true, ...defaultPreferences});
 });
 
 test('Telegram settings reject cross-origin, oversized, and invalid writes', async (t) => {
@@ -501,21 +502,22 @@ test('Telegram settings reject cross-origin, oversized, and invalid writes', asy
 });
 
 
-test('schedule updates preserve legacy Telegram settings and persist without sending a test', async (t) => {
+test('notification preferences preserve legacy Telegram settings and persist without sending a test', async (t) => {
     const {start, messages, file} = await telegramFixture(t);
     await fs.writeFile(file, JSON.stringify({enabled: true, chatId: '123', botToken: '1:legacy'}));
     const api = await start();
     assert.deepEqual(await api.status(), {
-        enabled: true, chatId: '123', hasToken: true, schedule: defaultSchedule
+        enabled: true, chatId: '123', hasToken: true, ...defaultPreferences
     });
 
     const schedule = {days: [0], windows: [
         {start: '07:00', end: '09:00', direction: 'badVoeslauToWien'},
         {start: '16:00', end: '18:00', direction: 'wienToBadVoeslau'}
     ]};
-    const result = await api.save({schedule});
+    const result = await api.save({schedule, minimumDelayMinutes: 15});
     assert.equal(result.status, 200);
-    assert.deepEqual(await result.json(), {enabled: true, chatId: '123', hasToken: true, schedule});
+    const configured = {enabled: true, chatId: '123', hasToken: true, schedule, minimumDelayMinutes: 15};
+    assert.deepEqual(await result.json(), configured);
     assert.deepEqual(messages, []);
     assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).botToken, '1:legacy');
 
@@ -529,18 +531,53 @@ test('schedule updates preserve legacy Telegram settings and persist without sen
     ]) {
         assert.equal((await api.save({schedule: invalid})).status, 400);
     }
-    assert.deepEqual((await (await start()).status()).schedule, schedule);
+    for (const invalid of [null, 0, -5, 12, 12.5, '15']) {
+        assert.equal((await api.save({minimumDelayMinutes: invalid})).status, 400);
+    }
+    assert.deepEqual(await (await start()).status(), configured);
 
     assert.equal((await api.save({enabled: false})).status, 200);
     const paused = {days: [], windows: []};
     assert.equal((await api.save({schedule: paused})).status, 200);
-    assert.deepEqual(await api.status(), {enabled: false, chatId: '123', hasToken: true, schedule: paused});
+    assert.deepEqual(await api.status(), {...configured, enabled: false, schedule: paused});
     assert.equal((await api.save({enabled: true, chatId: '123'})).status, 200);
-    assert.deepEqual((await api.status()).schedule, paused);
+    assert.deepEqual(await api.status(), {...configured, schedule: paused});
     assert.deepEqual(messages.map(({text}) => text), [
         'Train updates · Telegram alerts have been disabled.',
         'Train updates · Telegram alerts test'
     ]);
+});
+
+test('saving the minimum applies it to an in-flight Telegram poll', async (t) => {
+    const {start, messages} = await telegramFixture(t, {
+        TELEGRAM_BOT_TOKEN: '1:seed',
+        TELEGRAM_CHAT_ID: '123'
+    });
+    const now = Date.parse(sampleDepartures.lastUpdated);
+    const {promise: pendingLoad, resolve: finishLoad} = Promise.withResolvers();
+    const api = await start({
+        now: () => now,
+        loadDepartures: () => pendingLoad,
+        loadU1Status: async () => clearU1
+    });
+
+    const result = await api.save({minimumDelayMinutes: 5});
+    assert.equal(result.status, 200);
+    assert.equal((await result.json()).minimumDelayMinutes, 5);
+    assert.deepEqual(messages, []);
+    finishLoad({
+        ...sampleDepartures,
+        badVoeslauToWien: [{
+            pr: 'REX 1',
+            delay: 360,
+            cancelled: false,
+            [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
+        }]
+    });
+
+    await api.status();
+    assert.equal(messages.length, 1);
+    assert.match(messages[0].text, /delayed 6 min$/);
 });
 
 test('saved notification windows filter alerts by direction and Vienna local time', async (t) => {
@@ -574,9 +611,9 @@ test('saved notification windows filter alerts by direction and Vienna local tim
         const now = Date.parse(timestamp);
         const train = {
             pr: 'REX 1',
-            delay: 360,
+            delay: 600,
             cancelled: false,
-            [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 360_000}
+            [departureTiming]: {tripId: 'trip', plannedAt: now, expectedAt: now + 600_000}
         };
         let polled = false;
         let u1Polled = false;

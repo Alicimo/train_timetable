@@ -150,6 +150,7 @@ function createServer({
             getU1Status: () => u1Cache.get(),
             sendMessage,
             allowsAlerts: telegramSettings?.allowsAlerts,
+            getMinimumDelayMinutes: telegramSettings?.getMinimumDelayMinutes,
             now,
             logger
         });

@@ -2,7 +2,9 @@ const {randomUUID} = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-const {createTelegramSender, directions} = require('./telegram_alerts');
+const {
+    createTelegramSender, directions, DELAY_STEP_MINUTES, DEFAULT_MINIMUM_DELAY_MINUTES
+} = require('./telegram_alerts');
 
 const TEST_MESSAGE = 'Train updates · Telegram alerts test';
 const DISABLED_MESSAGE = 'Train updates · Telegram alerts have been disabled.';
@@ -72,6 +74,13 @@ class TelegramSettingsError extends Error {
     }
 }
 
+function normalizeMinimumDelayMinutes(value) {
+    if (!Number.isSafeInteger(value) || value < DELAY_STEP_MINUTES || value % DELAY_STEP_MINUTES !== 0) {
+        throw new TelegramSettingsError(400, 'Choose a minimum train delay of at least 5 minutes in 5-minute steps.');
+    }
+    return value;
+}
+
 function validCredentials({botToken, chatId}) {
     return typeof botToken === 'string' && /^\d+:[A-Za-z0-9_-]+$/.test(botToken)
         && typeof chatId === 'string' && /^(?:-?\d+|@[A-Za-z0-9_]+)$/.test(chatId);
@@ -91,7 +100,10 @@ async function saveSettings(file, settings) {
 
 async function createTelegramSettings({directory, env = process.env, request = fetch}) {
     const file = path.join(directory, 'telegram.json');
-    let settings = {enabled: false, chatId: null, botToken: null, schedule: DEFAULT_SCHEDULE};
+    let settings = {
+        enabled: false, chatId: null, botToken: null,
+        schedule: DEFAULT_SCHEDULE, minimumDelayMinutes: DEFAULT_MINIMUM_DELAY_MINUTES
+    };
     let issue;
 
     try {
@@ -105,7 +117,10 @@ async function createTelegramSettings({directory, env = process.env, request = f
             ...saved,
             schedule: saved.schedule === undefined
                 ? DEFAULT_SCHEDULE
-                : normalizeSchedule(saved.schedule, {discardDirectionless: true})
+                : normalizeSchedule(saved.schedule, {discardDirectionless: true}),
+            minimumDelayMinutes: saved.minimumDelayMinutes === undefined
+                ? DEFAULT_MINIMUM_DELAY_MINUTES
+                : normalizeMinimumDelayMinutes(saved.minimumDelayMinutes)
         };
     } catch (error) {
         if (error.code !== 'ENOENT') {
@@ -132,15 +147,21 @@ async function createTelegramSettings({directory, env = process.env, request = f
     let pendingUpdate = Promise.resolve();
 
     async function update(input, applySender) {
-        const scheduleOnly = input?.enabled === undefined && input?.schedule !== undefined;
-        if (!input || (!scheduleOnly && typeof input.enabled !== 'boolean')
+        const preferencesOnly = input?.enabled === undefined
+            && (input?.schedule !== undefined || input?.minimumDelayMinutes !== undefined);
+        if (!input || (!preferencesOnly && typeof input.enabled !== 'boolean')
             || (input.enabled && (typeof input.chatId !== 'string'
                 || (input.botToken !== undefined && typeof input.botToken !== 'string')))) {
             throw new TelegramSettingsError(400, 'Enter a valid Telegram chat ID and bot token.');
         }
 
         const schedule = input.schedule === undefined ? settings.schedule : normalizeSchedule(input.schedule);
-        const next = {...settings, schedule, enabled: scheduleOnly ? settings.enabled : input.enabled};
+        const minimumDelayMinutes = input.minimumDelayMinutes === undefined
+            ? settings.minimumDelayMinutes
+            : normalizeMinimumDelayMinutes(input.minimumDelayMinutes);
+        const next = {
+            ...settings, schedule, minimumDelayMinutes, enabled: preferencesOnly ? settings.enabled : input.enabled
+        };
         if (input.enabled) {
             next.chatId = input.chatId.trim();
             next.botToken = input.botToken?.trim() || settings.botToken;
@@ -184,6 +205,7 @@ async function createTelegramSettings({directory, env = process.env, request = f
             chatId: settings.chatId,
             hasToken: Boolean(settings.botToken),
             schedule: settings.schedule,
+            minimumDelayMinutes: settings.minimumDelayMinutes,
             ...(issue ? {issue} : {})
         };
     }
@@ -191,6 +213,7 @@ async function createTelegramSettings({directory, env = process.env, request = f
     return {
         status,
         allowsAlerts: (timestamp, direction) => isWithinSchedule(settings.schedule, timestamp, direction),
+        getMinimumDelayMinutes: () => settings.minimumDelayMinutes,
         sender: () => settings.enabled ? createTelegramSender(settings, request) : undefined,
         update(input, applySender) {
             const result = pendingUpdate.then(() => update(input, applySender));

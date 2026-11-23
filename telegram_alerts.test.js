@@ -72,15 +72,15 @@ test('poll checks all upcoming trains in both directions and skips stale data', 
     const messages = [];
     const data = {
         badVoeslauToWien: [
-            departure('past', -12, 300),
+            departure('past', -12, 600),
             departure('past-cancellation', -4, 0, true),
-            departure('next', 3, 299),
+            departure('next', 3, 599),
             departure('later', 24, 600),
             departure('cancelled-near-end-of-window', 115, 0, true)
         ],
         wienToBadVoeslau: [
-            departure('delayed-past-planned-time', -2, 300),
-            departure('southbound', 9, 300)
+            departure('delayed-past-planned-time', -2, 600),
+            departure('southbound', 9, 600)
         ]
     };
     const snapshot = {data, stale: true};
@@ -100,8 +100,8 @@ test('poll checks all upcoming trains in both directions and skips stale data', 
     assert.deepEqual(messages, [
         'Bad Vöslau → Wien Hbf · REX 1 10:24 · delayed 10 min',
         'Bad Vöslau → Wien Hbf · REX 1 11:55 · cancelled',
-        'Wien Hbf → Bad Vöslau · REX 1 09:58 · delayed 5 min',
-        'Wien Hbf → Bad Vöslau · REX 1 10:09 · delayed 5 min'
+        'Wien Hbf → Bad Vöslau · REX 1 09:58 · delayed 10 min',
+        'Wien Hbf → Bad Vöslau · REX 1 10:09 · delayed 10 min'
     ]);
 });
 
@@ -120,29 +120,77 @@ test('delay increases cross five-minute marks and decreases require a five-minut
         await poll();
     }
 
-    await reportDelay(299);
+    await reportDelay(599);
+    await reportDelay(0);
     assert.equal(messages.length, 0);
-    await reportDelay(300);
+    await reportDelay(600);
     await reportDelay(540);
+    await reportDelay(899);
     assert.equal(messages.length, 1);
-    await reportDelay(600);
-    await reportDelay(540);
-    await reportDelay(600);
-    await reportDelay(301);
+    await reportDelay(900);
+    await reportDelay(601);
     assert.equal(messages.length, 2);
-    await reportDelay(300);
+    await reportDelay(600);
+    await reportDelay(240);
     await reportDelay(null);
-    assert.equal(messages.length, 3);
+    await reportDelay(540);
+    assert.equal(messages.length, 4);
     await reportDelay(0);
     await reportDelay(0);
-    await reportDelay(1260);
+    await reportDelay(599);
+    await reportDelay(600);
 
     assert.deepEqual(messages, [
-        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delayed 5 min',
-        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay increased to 10 min',
-        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay decreased to 5 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delayed 10 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay increased to 15 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay decreased to 10 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay decreased to 4 min',
         'Bad Vöslau → Wien Hbf · REX 1 10:06 · back on time',
-        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay increased to 21 min'
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delayed 10 min'
+    ]);
+});
+
+test('failed recovery is retried after a live change to the minimum', async () => {
+    const messages = [];
+    let minimumDelayMinutes = 5;
+    let failSend = false;
+    const data = {badVoeslauToWien: [], wienToBadVoeslau: []};
+    const poll = createTelegramPoll({
+        getDepartures: async () => ({data, stale: false}),
+        getMinimumDelayMinutes: () => minimumDelayMinutes,
+        async sendMessage(message) {
+            messages.push(message);
+            if (failSend) {
+                throw new Error('simulated network failure');
+            }
+        },
+        now: () => now,
+        logger: {error() {}}
+    });
+
+    async function reportDelay(seconds) {
+        data.badVoeslauToWien = [departure('northbound', 6, seconds)];
+        await poll();
+    }
+
+    await reportDelay(510);
+    await reportDelay(210);
+    minimumDelayMinutes = 15;
+    await reportDelay(600);
+    failSend = true;
+    await reportDelay(0);
+    failSend = false;
+    await reportDelay(0);
+    await reportDelay(0);
+    await reportDelay(899);
+    await reportDelay(900);
+
+    assert.deepEqual(messages, [
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delayed 8 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay decreased to 3 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · back on time',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · back on time',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delayed 15 min'
     ]);
 });
 
@@ -151,7 +199,7 @@ test('a failed send can be retried and a cancellation can follow delay updates',
     const errors = [];
     let failSend = true;
     const data = {
-        badVoeslauToWien: [departure('northbound', 6, 360)],
+        badVoeslauToWien: [departure('northbound', 6, 660)],
         wienToBadVoeslau: []
     };
     const poll = createTelegramPoll({
@@ -173,7 +221,7 @@ test('a failed send can be retried and a cancellation can follow delay updates',
     failSend = false;
     await poll();
     failSend = true;
-    data.badVoeslauToWien = [departure('northbound', 6, 720)];
+    data.badVoeslauToWien = [departure('northbound', 6, 960)];
     await poll();
     assert.equal(messages.length, 1);
     failSend = false;
@@ -183,8 +231,8 @@ test('a failed send can be retried and a cancellation can follow delay updates',
     await poll();
     await poll();
     assert.deepEqual(messages, [
-        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delayed 6 min',
-        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay increased to 12 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delayed 11 min',
+        'Bad Vöslau → Wien Hbf · REX 1 10:06 · delay increased to 16 min',
         'Bad Vöslau → Wien Hbf · REX 1 10:06 · cancelled'
     ]);
 });
@@ -217,7 +265,7 @@ test('poll honors schedule changes during a refresh and keeps alert history', as
                 allowed = false;
             }
             return {data: {
-                badVoeslauToWien: [departure('delayed', 10, 300)],
+                badVoeslauToWien: [departure('delayed', 10, 600)],
                 wienToBadVoeslau: []
             }, stale: false};
         },

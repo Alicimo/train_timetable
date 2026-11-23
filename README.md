@@ -59,13 +59,15 @@ your saved token. **Disable alerts** pauses notifications and keeps the saved
 credentials for the next time you enable them. The bot sends a confirmation to
 the saved chat. If delivery fails, the dashboard reports it and alerts stay off.
 
-In the same dropdown, choose **Notification days** and add time windows, then select **Save schedule**. Without windows, alerts can be sent all
-day on the selected days. Clear every day to pause scheduled alerts. Times use
+In the same dropdown, choose **Notification days**, add time windows, and set the
+**Minimum train delay (minutes)** in five-minute steps. Select **Save notification
+preferences** to apply your changes. Without windows, alerts can be sent all day
+on the selected days. Clear every day to pause scheduled alerts. Times use
 Europe/Vienna, including daylight saving. A window that ends earlier than it
 starts continues into the following day. Each window applies to the time an
 alert is sent and can cover either route direction or both. The service discards
 saved windows that have no direction. Schedules with no windows cover both
-directions all day on the selected days. Schedule changes take effect without
+directions all day on the selected days. Notification preferences take effect without
 restarting the service or sending a test message.
 
 The dashboard and its settings are intended for access over a private network
@@ -74,10 +76,12 @@ such as Tailscale. Anyone who can reach the dashboard can change the alert setti
 The service uses the same departure cache as the website. About once a minute it
 checks all upcoming trains returned for both directions. The snapshot covers two hours of scheduled
 departures per direction and includes recently scheduled trains still due to depart. The bot sends an initial alert for a
-cancellation or a delay of at least five minutes. For a reported delay, it sends
-an update when the delay reaches a higher five-minute band or drops by at least
-five minutes from the last reported delay. A train going from 10 to 9 minutes late
-does not trigger an update. A cancellation can follow a delay alert. Stale
+cancellation or a delay that reaches the configured minimum, which defaults to
+10 minutes. For a reported delay, it sends an update when the delay reaches a
+higher five-minute band at or above the minimum or drops by at least five minutes
+from the last reported delay. If a reported delay reaches zero, the bot sends one
+“back on time” update even when the final drop is smaller than five minutes.
+A cancellation can follow a delay alert. Stale
 departure data and unknown delay values do not trigger delay alerts.
 The service remembers successful sends in memory, so restarting the service or
 changing the destination can repeat a recent alert.

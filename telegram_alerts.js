@@ -3,7 +3,9 @@ const {departureTiming} = require('./fetch_departures');
 const POLL_INTERVAL_MS = 60_000;
 const SEND_TIMEOUT_MS = 10_000;
 const ALERT_MEMORY_MS = 2 * 60 * 60 * 1_000;
-const DELAY_STEP_SECONDS = 5 * 60;
+const DELAY_STEP_MINUTES = 5;
+const DELAY_STEP_SECONDS = DELAY_STEP_MINUTES * 60;
+const DEFAULT_MINIMUM_DELAY_MINUTES = 10;
 
 const directions = {
     badVoeslauToWien: 'Bad Vöslau → Wien Hbf',
@@ -16,7 +18,10 @@ const departureClock = new Intl.DateTimeFormat('de-AT', {
     timeZone: 'Europe/Vienna'
 });
 
-function createTelegramPoll({getDepartures, sendMessage, now, logger, allowsAlerts = () => true}) {
+function createTelegramPoll({
+    getDepartures, sendMessage, now, logger, allowsAlerts = () => true,
+    getMinimumDelayMinutes = () => DEFAULT_MINIMUM_DELAY_MINUTES
+}) {
     const sentAlerts = new Map();
 
     return async function poll(signal) {
@@ -55,21 +60,22 @@ function createTelegramPoll({getDepartures, sendMessage, now, logger, allowsAler
                 }
 
                 const delay = train.cancelled ? 0 : Math.max(0, train.delay);
+                const recovered = !train.cancelled && delay === 0 && previous !== undefined;
                 let disruption = 'cancelled';
                 if (!train.cancelled) {
                     const delayBand = Math.floor(delay / DELAY_STEP_SECONDS);
                     const previousDelay = previous?.delay ?? 0;
                     const previousBand = Math.floor(previousDelay / DELAY_STEP_SECONDS);
-                    const increased = delayBand > previousBand;
+                    const increased = delay >= getMinimumDelayMinutes() * 60 && delayBand > previousBand;
                     const decreased = previousDelay - delay >= DELAY_STEP_SECONDS;
-                    if (!increased && !decreased) {
+                    if (!increased && !decreased && !recovered) {
                         continue;
                     }
 
                     const minutes = Math.floor(delay / 60);
                     if (!previous) {
                         disruption = `delayed ${minutes} min`;
-                    } else if (delay === 0) {
+                    } else if (recovered) {
                         disruption = 'back on time';
                     } else {
                         const duration = minutes ? `${minutes} min` : 'under 1 min';
@@ -82,11 +88,15 @@ function createTelegramPoll({getDepartures, sendMessage, now, logger, allowsAler
                 }
                 try {
                     await sendMessage(text, signal);
-                    sentAlerts.set(key, {
-                        cancelled: train.cancelled,
-                        delay,
-                        expiresAt: Math.max(timing.plannedAt, timing.expectedAt) + ALERT_MEMORY_MS
-                    });
+                    if (recovered) {
+                        sentAlerts.delete(key);
+                    } else {
+                        sentAlerts.set(key, {
+                            cancelled: train.cancelled,
+                            delay,
+                            expiresAt: Math.max(timing.plannedAt, timing.expectedAt) + ALERT_MEMORY_MS
+                        });
+                    }
                 } catch {
                     if (!signal?.aborted) {
                         logger.error('Telegram train alert failed');
@@ -186,4 +196,7 @@ function createTelegramSender({botToken, chatId}, request = fetch) {
     };
 }
 
-module.exports = {createTelegramPoll, createU1TelegramPoll, startPolling, startTelegramAlerts, createTelegramSender, directions};
+module.exports = {
+    createTelegramPoll, createU1TelegramPoll, startPolling, startTelegramAlerts, createTelegramSender,
+    directions, DELAY_STEP_MINUTES, DEFAULT_MINIMUM_DELAY_MINUTES
+};

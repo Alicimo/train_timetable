@@ -391,8 +391,9 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
     const setup = await api.save({enabled: true, chatId: '-123', botToken: '1:mock-token'});
     assert.equal(setup.status, 200);
     assert.deepEqual(await setup.json(), configured);
-    assert.equal(messages[0].text, 'Train updates · Telegram alerts test');
-    assert.match(messages[1].text, /delayed 10 min/);
+    assert.equal(messages[0].text, 'Train updates · Telegram alerts test\nhttps://trains.alistair-martin.com');
+    assert.equal(messages[1].text,
+        'Bad Vöslau → Wien Hbf · REX 1 14:00 · delayed 10 min\nhttps://trains.alistair-martin.com');
     assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
     assert.deepEqual(await (await start()).status(), configured);
 
@@ -413,7 +414,8 @@ test('configure, update, rotate, and re-enable Telegram using the dashboard API'
     assert.deepEqual(messages.at(-1), {
         url: 'https://api.telegram.org/bot2:new-token/sendMessage',
         chat_id: '-456',
-        text: 'Train updates · Telegram alerts have been disabled.'
+        text: 'Train updates · Telegram alerts have been disabled.\nhttps://trains.alistair-martin.com',
+        link_preview_options: {is_disabled: true}
     });
     assert.equal((await api.save({enabled: false})).status, 200);
     assert.equal(messages.length, beforeDisable + 1);
@@ -543,8 +545,8 @@ test('notification preferences preserve legacy Telegram settings and persist wit
     assert.equal((await api.save({enabled: true, chatId: '123'})).status, 200);
     assert.deepEqual(await api.status(), {...configured, schedule: paused});
     assert.deepEqual(messages.map(({text}) => text), [
-        'Train updates · Telegram alerts have been disabled.',
-        'Train updates · Telegram alerts test'
+        'Train updates · Telegram alerts have been disabled.\nhttps://trains.alistair-martin.com',
+        'Train updates · Telegram alerts test\nhttps://trains.alistair-martin.com'
     ]);
 });
 
@@ -577,7 +579,8 @@ test('saving the minimum applies it to an in-flight Telegram poll', async (t) =>
 
     await api.status();
     assert.equal(messages.length, 1);
-    assert.match(messages[0].text, /delayed 6 min$/);
+    assert.equal(messages[0].text,
+        'Bad Vöslau → Wien Hbf · REX 1 14:00 · delayed 6 min\nhttps://trains.alistair-martin.com');
 });
 
 test('saved notification windows filter alerts by direction and Vienna local time', async (t) => {

@@ -238,6 +238,7 @@ test('a failed send can be retried and a cancellation can follow delay updates',
 });
 
 test('Telegram sender requires positive confirmation from the Bot API', async () => {
+    const message = 'U1 service notice · Verspätungen\nUnregelmäßige Intervalle.';
     let result = {ok: false};
     const send = createTelegramSender({
         botToken: '123:mock-token',
@@ -245,13 +246,17 @@ test('Telegram sender requires positive confirmation from the Bot API', async ()
     }, async (url, options) => {
         assert.equal(url, 'https://api.telegram.org/bot123:mock-token/sendMessage');
         assert.equal(options.method, 'POST');
-        assert.deepEqual(JSON.parse(options.body), {chat_id: '-456', text: 'Delay alert'});
+        assert.deepEqual(JSON.parse(options.body), {
+            chat_id: '-456',
+            text: 'U1 service notice · Verspätungen\nUnregelmäßige Intervalle.\nhttps://trains.alistair-martin.com',
+            link_preview_options: {is_disabled: true}
+        });
         return new Response(JSON.stringify(result));
     });
 
-    await assert.rejects(send('Delay alert'), /Telegram rejected/);
+    await assert.rejects(send(message), /Telegram rejected/);
     result = {ok: true};
-    await send('Delay alert');
+    await send(message);
 });
 
 

@@ -2,6 +2,7 @@ const {departureTiming} = require('./fetch_departures');
 
 const POLL_INTERVAL_MS = 60_000;
 const SEND_TIMEOUT_MS = 10_000;
+const DASHBOARD_URL = 'https://trains.alistair-martin.com';
 const ALERT_MEMORY_MS = 2 * 60 * 60 * 1_000;
 const DELAY_STEP_MINUTES = 5;
 const DELAY_STEP_SECONDS = DELAY_STEP_MINUTES * 60;
@@ -185,7 +186,11 @@ function createTelegramSender({botToken, chatId}, request = fetch) {
         const response = await request(`https://api.telegram.org/bot${botToken}/sendMessage`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({chat_id: chatId, text}),
+            body: JSON.stringify({
+                chat_id: chatId,
+                text: text + '\n' + DASHBOARD_URL,
+                link_preview_options: {is_disabled: true}
+            }),
             redirect: 'error',
             signal: signal ? AbortSignal.any([signal, timeout]) : timeout
         });
